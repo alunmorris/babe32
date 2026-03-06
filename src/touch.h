@@ -1,0 +1,6 @@
+// 060326 GT911 touch via bb_captouch, registered as LVGL indev
+#pragma once
+#include <lvgl.h>
+
+void touch_init();
+void touch_lvgl_init();
