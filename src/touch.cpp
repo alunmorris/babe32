@@ -15,7 +15,11 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         data->point.x = ti.x[0];
         data->point.y = ti.y[0];
         data->state   = LV_INDEV_STATE_PR;
+        Serial.printf("Touch PRESS  x=%d y=%d\n", ti.x[0], ti.y[0]);
     } else {
+        if (data->state == LV_INDEV_STATE_PR) {
+            Serial.println("Touch RELEASE");
+        }
         data->state = LV_INDEV_STATE_REL;
     }
 }

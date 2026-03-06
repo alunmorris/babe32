@@ -24,10 +24,10 @@ static const int LCD_B[] = {11, 12, 13, 14, 0};
 #define LCD_H_RES 480
 #define LCD_V_RES 480
 
-// LVGL draw buffers — allocate in PSRAM
-#define BUF_LINES 20
+// Full-screen LVGL draw buffer in PSRAM.
+// Single full-screen buffer + full_refresh=1 means one flush per frame,
+// avoiding the strip-by-strip racing with the RGB panel scanner.
 static lv_color_t *buf1 = nullptr;
-static lv_color_t *buf2 = nullptr;
 static lv_disp_draw_buf_t draw_buf;
 static lv_disp_drv_t disp_drv;
 
@@ -124,7 +124,7 @@ void display_init() {
     panel_config.clk_src = LCD_CLK_SRC_PLL160M;
     panel_config.timings.h_res = LCD_H_RES;
     panel_config.timings.v_res = LCD_V_RES;
-    panel_config.timings.pclk_hz = 16 * 1000 * 1000; // 16MHz
+    panel_config.timings.pclk_hz = 12 * 1000 * 1000; // 12MHz — 16MHz causes bit errors on fast transitions
     panel_config.timings.hsync_back_porch = 10;
     panel_config.timings.hsync_front_porch = 50;
     panel_config.timings.hsync_pulse_width = 8;
@@ -158,19 +158,19 @@ void display_init() {
 }
 
 void display_lvgl_init() {
-    // Allocate LVGL draw buffers in PSRAM
-    size_t buf_size = LCD_H_RES * BUF_LINES * sizeof(lv_color_t);
+    // Full-screen draw buffer in PSRAM (480*480*2 = 460 KB)
+    size_t buf_size = LCD_H_RES * LCD_V_RES * sizeof(lv_color_t);
     buf1 = (lv_color_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    buf2 = (lv_color_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    assert(buf1 && buf2);
+    assert(buf1);
 
-    lv_disp_draw_buf_init(&draw_buf, buf1, buf2, LCD_H_RES * BUF_LINES);
+    lv_disp_draw_buf_init(&draw_buf, buf1, nullptr, LCD_H_RES * LCD_V_RES);
 
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res  = LCD_H_RES;
-    disp_drv.ver_res  = LCD_V_RES;
-    disp_drv.flush_cb = lvgl_flush_cb;
-    disp_drv.draw_buf = &draw_buf;
+    disp_drv.hor_res      = LCD_H_RES;
+    disp_drv.ver_res      = LCD_V_RES;
+    disp_drv.flush_cb     = lvgl_flush_cb;
+    disp_drv.draw_buf     = &draw_buf;
+    disp_drv.full_refresh = 1;  // single flush per frame, avoids strip-scan race
     lv_disp_drv_register(&disp_drv);
     Serial.println("LVGL display driver registered");
 }

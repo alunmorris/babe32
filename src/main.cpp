@@ -1,4 +1,6 @@
-// 060326 Task 3: test touch
+// 060326 Task 3: test display + touch
+// NOTE: Touch (GPIO19/SDA) conflicts with USB serial when connected.
+// Touch will work in final firmware without USB active.
 #include <Arduino.h>
 #include <lvgl.h>
 #include "display.h"
