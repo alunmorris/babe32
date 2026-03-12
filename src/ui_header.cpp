@@ -1,0 +1,83 @@
+// 060326 Header bar implementation
+// 120326 Remove forward button; enlarge back button hit area
+#include "ui_header.h"
+#include <Arduino.h>
+
+static lv_obj_t *s_back_btn = nullptr;
+static lv_obj_t *s_url_ta   = nullptr;
+
+static navigate_cb_t s_nav_cb  = nullptr;
+static back_cb_t     s_back_cb = nullptr;
+
+static void back_btn_cb(lv_event_t *e) {
+    if (s_back_cb) s_back_cb();
+}
+
+lv_obj_t *header_create(lv_obj_t *parent,
+                          navigate_cb_t on_navigate,
+                          back_cb_t on_back,
+                          forward_cb_t on_forward) {
+    s_nav_cb  = on_navigate;
+    s_back_cb = on_back;
+
+    lv_obj_t *hdr = lv_obj_create(parent);
+    lv_obj_set_size(hdr, LV_HOR_RES, 30);
+    lv_obj_set_pos(hdr, 0, 0);
+    lv_obj_set_style_bg_color(hdr, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_radius(hdr, 0, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 2, 0);
+    lv_obj_set_style_shadow_width(hdr, 0, 0);
+    lv_obj_set_style_outline_width(hdr, 0, 0);
+    lv_obj_set_scrollbar_mode(hdr, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Back button — 30x26 hit area
+    s_back_btn = lv_label_create(hdr);
+    lv_obj_set_size(s_back_btn, 30, 26);
+    lv_obj_set_pos(s_back_btn, 0, 0);
+    lv_label_set_text(s_back_btn, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(s_back_btn, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(s_back_btn, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_pad_top(s_back_btn, 3, 0);
+    lv_obj_set_style_pad_left(s_back_btn, 4, 0);
+    lv_obj_add_flag(s_back_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    // URL label
+    s_url_ta = lv_label_create(hdr);
+    lv_obj_set_size(s_url_ta, LV_HOR_RES - 38, LV_SIZE_CONTENT);
+    lv_obj_set_pos(s_url_ta, 34, 5);
+    lv_label_set_long_mode(s_url_ta, LV_LABEL_LONG_CLIP);
+    lv_label_set_text(s_url_ta, "");
+    lv_obj_set_style_text_color(s_url_ta, lv_color_hex(0xE0E0E0), 0);
+
+    return hdr;
+}
+
+void header_set_url(const char *url) {
+    if (s_url_ta && url) lv_label_set_text(s_url_ta, url);
+}
+
+void header_set_back_enabled(bool en) {
+    if (!s_back_btn) return;
+    if (en) {
+        lv_obj_clear_state(s_back_btn, LV_STATE_DISABLED);
+        lv_obj_set_style_text_color(s_back_btn, lv_color_hex(0xE0E0E0), 0);
+    } else {
+        lv_obj_add_state(s_back_btn, LV_STATE_DISABLED);
+        lv_obj_set_style_text_color(s_back_btn, lv_color_hex(0x555555), 0);
+    }
+}
+
+void header_set_forward_enabled(bool en) {
+    // Forward button removed
+}
+
+void header_set_loading(bool loading) {
+    header_set_back_enabled(!loading);
+    if (s_url_ta) {
+        if (loading) lv_obj_add_state(s_url_ta, LV_STATE_DISABLED);
+        else         lv_obj_clear_state(s_url_ta, LV_STATE_DISABLED);
+    }
+}
