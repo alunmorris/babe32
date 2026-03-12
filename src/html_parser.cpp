@@ -77,6 +77,22 @@ static void decode_entities(char *s) {
             else if (strncmp(r, "&nbsp;", 6) == 0) { *w++ = ' ';  r += 6; }
             else if (strncmp(r, "&quot;", 6) == 0) { *w++ = '"';  r += 6; }
             else if (strncmp(r, "&#39;",  5) == 0) { *w++ = '\''; r += 5; }
+            else if (strncmp(r, "&#", 2) == 0) {
+                // Numeric entity &#NN; or &#xNN; — skip non-ASCII, keep ASCII
+                char *semi = strchr(r, ';');
+                if (semi && semi - r < 12) {
+                    long cp = 0;
+                    if (r[2] == 'x' || r[2] == 'X')
+                        cp = strtol(r + 3, nullptr, 16);
+                    else
+                        cp = strtol(r + 2, nullptr, 10);
+                    if (cp >= 0x20 && cp <= 0x7E)
+                        *w++ = (char)cp;
+                    r = semi + 1;
+                } else {
+                    *w++ = *r++;
+                }
+            }
             else                                    { *w++ = *r++; }
         } else {
             *w++ = *r++;
@@ -121,7 +137,15 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
     while (*p) {
         if (*p != '<') {
             if (in_body && acc_len < sizeof(text_acc) - 1) {
-                if (isspace((uint8_t)*p)) {
+                uint8_t c = (uint8_t)*p;
+                if (c >= 0x80) {
+                    // Skip UTF-8 multi-byte sequence (Montserrat has no glyphs)
+                    if      (c >= 0xF0) p += 4;  // 4-byte
+                    else if (c >= 0xE0) p += 3;  // 3-byte
+                    else                p += 2;   // 2-byte
+                    continue;
+                }
+                if (isspace(c)) {
                     if (acc_len > 0 && text_acc[acc_len-1] != ' ')
                         text_acc[acc_len++] = ' ';
                 } else {
