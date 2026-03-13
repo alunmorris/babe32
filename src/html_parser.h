@@ -24,7 +24,7 @@ typedef struct {
     bool     multiline; // true for <textarea>
 } PageElement;
 
-#define MAX_ELEMENTS 512
+#define MAX_ELEMENTS 1024
 
 typedef struct {
     PageElement elems[MAX_ELEMENTS];
@@ -33,7 +33,7 @@ typedef struct {
     int         http_status;        // HTTP status code (e.g. 404), 0 if unknown
     char        form_action[512];   // form action URL (resolved)
     bool        form_is_post;       // true = POST, false = GET
-    char        text_pool[65536];   // 64KB inline text pool
+    char        text_pool[131072];  // 128KB inline text pool
     size_t      pool_used;
 } ParseResult;
 

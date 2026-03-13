@@ -109,7 +109,7 @@ static void decode_entities(char *s) {
 void html_parse(const char *html, const char *base_url, ParseResult *r) {
     url_set_base(base_url);
 
-    static char text_acc[4096];
+    static char text_acc[8192];
     size_t acc_len = 0;
 
     ElemType cur_type  = ELEM_PARAGRAPH;
