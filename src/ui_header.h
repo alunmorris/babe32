@@ -1,4 +1,5 @@
 // 060326 Header bar: back/forward buttons + URL textarea
+// 120326 Add keyboard support for URL entry
 #pragma once
 #include <lvgl.h>
 
@@ -15,3 +16,9 @@ void header_set_url(const char *url);
 void header_set_back_enabled(bool en);
 void header_set_forward_enabled(bool en);
 void header_set_loading(bool loading);
+
+// Get the URL textarea object (for keyboard association)
+lv_obj_t *header_get_url_ta();
+
+// Get current text from URL bar
+const char *header_get_url_text();

@@ -82,6 +82,19 @@ static bool IRAM_ATTR on_color_trans_done(esp_lcd_panel_io_handle_t panel_io,
     return woken == pdTRUE;
 }
 
+// AXS15231B QSPI: RAMWRC ignores CASET/RASET and continues from last write.
+// Non-contiguous partial updates (e.g. header then keyboard) cause corruption.
+// Force every dirty region to start at y=0 so LVGL always flushes top-to-bottom
+// sequentially: RAMWR at y=0, then RAMWRC continuing in order.
+static void lvgl_rounder_cb(lv_disp_drv_t *drv, lv_area_t *area) {
+    area->x1 = 0;
+    area->x2 = LCD_H_RES - 1;
+    area->y1 = 0;
+    // Round y2 up to next chunk boundary for alignment
+    area->y2 = ((area->y2 / DMA_CHUNK_ROWS) + 1) * DMA_CHUNK_ROWS - 1;
+    if (area->y2 >= LCD_V_RES) area->y2 = LCD_V_RES - 1;
+}
+
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map) {
     // Drain any stale semaphore from display_clear/fill_solid DMA calls
     xSemaphoreTake(s_flush_done, 0);
@@ -187,7 +200,8 @@ void display_lvgl_init() {
     disp_drv.ver_res      = LCD_V_RES;   // 480
     disp_drv.flush_cb     = lvgl_flush_cb;
     disp_drv.draw_buf     = &draw_buf;
-    disp_drv.full_refresh = 0;   // partial refresh; full invalidate done in ui_task tick loop
+    disp_drv.full_refresh = 0;
+    disp_drv.rounder_cb  = lvgl_rounder_cb;
     lv_disp_drv_register(&disp_drv);
     Serial.println("LVGL display driver registered (320x480 portrait)");
 }

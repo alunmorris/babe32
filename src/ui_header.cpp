@@ -1,5 +1,6 @@
 // 060326 Header bar implementation
 // 120326 Remove forward button; enlarge back button hit area
+// 120326 URL bar is now a textarea for keyboard input
 #include "ui_header.h"
 #include <Arduino.h>
 
@@ -44,19 +45,45 @@ lv_obj_t *header_create(lv_obj_t *parent,
     lv_obj_add_flag(s_back_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
 
-    // URL label
-    s_url_ta = lv_label_create(hdr);
-    lv_obj_set_size(s_url_ta, LV_HOR_RES - 38, LV_SIZE_CONTENT);
-    lv_obj_set_pos(s_url_ta, 34, 5);
-    lv_label_set_long_mode(s_url_ta, LV_LABEL_LONG_CLIP);
-    lv_label_set_text(s_url_ta, "");
+    // URL textarea (single line)
+    s_url_ta = lv_textarea_create(hdr);
+    lv_obj_set_size(s_url_ta, LV_HOR_RES - 38, 26);
+    lv_obj_set_pos(s_url_ta, 34, 0);
+    lv_textarea_set_one_line(s_url_ta, true);
+    lv_textarea_set_text(s_url_ta, "");
+    lv_obj_set_style_bg_color(s_url_ta, lv_color_hex(0x16213E), 0);
     lv_obj_set_style_text_color(s_url_ta, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(s_url_ta, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_border_width(s_url_ta, 0, 0);
+    lv_obj_set_style_radius(s_url_ta, 0, 0);
+    lv_obj_set_style_pad_top(s_url_ta, 4, 0);
+    lv_obj_set_style_pad_bottom(s_url_ta, 2, 0);
+    lv_obj_set_style_pad_left(s_url_ta, 4, 0);
+    lv_obj_set_style_shadow_width(s_url_ta, 0, 0);
+    lv_obj_set_style_outline_width(s_url_ta, 0, 0);
+    lv_obj_set_style_anim_time(s_url_ta, 0, 0);
+    // Cursor: bright block, no border/radius (renders as noise on this display)
+    lv_obj_set_style_bg_color(s_url_ta, lv_color_hex(0x4FC3F7), LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(s_url_ta, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(s_url_ta, 0, LV_PART_CURSOR);
+    lv_obj_set_style_radius(s_url_ta, 0, LV_PART_CURSOR);
+    // No cursor blink — reduces redraws
+    lv_obj_set_style_anim_time(s_url_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
 
     return hdr;
 }
 
 void header_set_url(const char *url) {
-    if (s_url_ta && url) lv_label_set_text(s_url_ta, url);
+    if (s_url_ta && url) lv_textarea_set_text(s_url_ta, url);
+}
+
+const char *header_get_url_text() {
+    if (s_url_ta) return lv_textarea_get_text(s_url_ta);
+    return "";
+}
+
+lv_obj_t *header_get_url_ta() {
+    return s_url_ta;
 }
 
 void header_set_back_enabled(bool en) {

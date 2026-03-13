@@ -1,6 +1,7 @@
 // 060326 Full browser UI wiring
 // 110326 Replace diagnostic loop with full LVGL + browser init
 // 120326 Fix cross-core rendering via task notification; sync flush + full invalidate
+// 120326 Add on-screen keyboard for URL entry
 #include "ui_task.h"
 #include "ui_header.h"
 #include "page_renderer.h"
@@ -17,9 +18,13 @@
 #include <freertos/task.h>
 
 #define HOMEPAGE "https://en.wikipedia.org/wiki/ESP32"
+#define KB_HEIGHT 180
 
 static SemaphoreHandle_t s_lvgl_mutex    = nullptr;
 static lv_obj_t         *s_content       = nullptr;
+static lv_obj_t         *s_kb            = nullptr;
+static lv_obj_t         *s_show_btn      = nullptr;
+static bool              s_kb_visible    = false;
 static ParseResult      *s_cur_result    = nullptr;
 static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
@@ -33,6 +38,9 @@ void lvgl_unlock() {
 }
 
 static void do_navigate(const char *url);
+
+static void kb_show();
+static void kb_hide();
 
 static void on_back() {
     const char *url = history_back();
@@ -69,12 +77,59 @@ static void on_page_ready(ParseResult *result, const char *url) {
     if (s_ui_task_handle) xTaskNotifyGive(s_ui_task_handle);
 }
 
+// --- Keyboard management ---
+
+static void kb_event_cb(lv_event_t *e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_READY) {
+        // Enter pressed — navigate to typed URL and hide keyboard
+        const char *url = header_get_url_text();
+        if (url && url[0]) {
+            kb_hide();
+            do_navigate(url);
+        }
+    } else if (code == LV_EVENT_CANCEL) {
+        kb_hide();
+    }
+}
+
+static void url_ta_click_cb(lv_event_t *e) {
+    kb_show();
+}
+
+static void show_btn_cb(lv_event_t *e) {
+    kb_show();
+}
+
+static void kb_show() {
+    if (!s_kb || !s_content || !s_show_btn) return;
+    lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_height(s_content, LV_VER_RES - 30 - KB_HEIGHT);
+    lv_obj_t *ta = header_get_url_ta();
+    lv_keyboard_set_textarea(s_kb, ta);
+    lv_textarea_set_cursor_pos(ta, LV_TEXTAREA_CURSOR_LAST);
+    lv_obj_add_state(ta, LV_STATE_FOCUSED);
+    s_kb_visible = true;
+}
+
+static void kb_hide() {
+    if (!s_kb || !s_content || !s_show_btn) return;
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_height(s_content, LV_VER_RES - 30);
+    lv_obj_clear_state(header_get_url_ta(), LV_STATE_FOCUSED);
+    lv_keyboard_set_textarea(s_kb, NULL);
+    s_kb_visible = false;
+}
+
 void ui_build_root() {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x1A1A2E), 0);
 
     header_create(scr, do_navigate, on_back, on_forward);
 
+    // Content area
     s_content = lv_obj_create(scr);
     lv_obj_set_size(s_content, LV_HOR_RES, LV_VER_RES - 30);
     lv_obj_set_pos(s_content, 0, 30);
@@ -88,6 +143,55 @@ void ui_build_root() {
     lv_obj_set_scrollbar_mode(s_content, LV_SCROLLBAR_MODE_AUTO);
 
     gesture_attach(s_content, on_back, on_forward);
+
+    // Keyboard — hidden by default, minimal flat styling
+    s_kb = lv_keyboard_create(scr);
+    lv_obj_set_size(s_kb, LV_HOR_RES, KB_HEIGHT);
+    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_pad_gap(s_kb, 2, 0);
+    // Remove theme — apply a bare style to all parts/states
+    lv_obj_remove_style_all(s_kb);
+    lv_obj_set_size(s_kb, LV_HOR_RES, KB_HEIGHT);
+    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    // Main background
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x16213E), 0);
+    lv_obj_set_style_pad_all(s_kb, 2, 0);
+    lv_obj_set_style_pad_gap(s_kb, 2, 0);
+    // Keys — default
+    lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x0F3460), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    // Keys — pressed
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x4FC3F7), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(0x1A1A2E), LV_PART_ITEMS | LV_STATE_PRESSED);
+    // Keys — checked (Shift, ABC/123)
+    lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x0A2040), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(s_kb, lv_color_hex(0xE0E0E0), LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_kb, kb_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_kb, kb_event_cb, LV_EVENT_CANCEL, NULL);
+
+    // "Show" button — bottom-right, visible when keyboard hidden
+    s_show_btn = lv_label_create(scr);
+    lv_label_set_text(s_show_btn, "Kb");
+    lv_obj_set_size(s_show_btn, 36, 24);
+    lv_obj_align(s_show_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+    lv_obj_set_style_bg_opa(s_show_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_show_btn, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_text_color(s_show_btn, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(s_show_btn, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(s_show_btn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(s_show_btn, 4, 0);
+    lv_obj_set_style_radius(s_show_btn, 2, 0);
+    lv_obj_set_style_shadow_width(s_show_btn, 0, 0);
+    lv_obj_set_style_border_width(s_show_btn, 0, 0);
+    lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_show_btn, show_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    // Tap URL bar to show keyboard
+    lv_obj_add_event_cb(header_get_url_ta(), url_ta_click_cb, LV_EVENT_CLICKED, NULL);
+
     update_nav_buttons();
 }
 
@@ -142,8 +246,8 @@ static void ui_task_fn(void *arg) {
                 lv_obj_scroll_to(s_content, 0, 0, LV_ANIM_OFF);
                 update_nav_buttons();
             }
-            // Periodic full invalidate — LVGL dirty tracking broken with this display
-            // Only every 100ms to avoid starving touch input
+            // Periodic full invalidate — rounder_cb ensures all flushes are
+            // sequential top-to-bottom, so this is safe at any interval
             static uint32_t last_inv = 0;
             if (millis() - last_inv > 100) {
                 last_inv = millis();
