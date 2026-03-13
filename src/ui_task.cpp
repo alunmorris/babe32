@@ -78,6 +78,7 @@ static bool              s_kb_visible    = false;
 static ParseResult      *s_cur_result    = nullptr;
 static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
+static bool              s_loading       = false;
 volatile int             g_fetch_kb = 0;
 
 bool lvgl_lock(uint32_t ms) {
@@ -123,6 +124,7 @@ static void load_url(const char *url) {
         lvgl_unlock();
     }
     g_fetch_kb = 0;
+    s_loading = true;
     net_task_load(url);
 }
 
@@ -152,6 +154,7 @@ static void on_form_submit(const char *action_url, bool is_post,
             lvgl_unlock();
         }
         g_fetch_kb = 0;
+        s_loading = true;
         net_task_load_post(action_url, encoded_body);
     } else {
         // GET: append query string to action URL
@@ -295,6 +298,7 @@ void ui_build_root() {
     lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, LV_PART_ITEMS);
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x0F3460), LV_PART_ITEMS);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(0xE0E0E0), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_18, LV_PART_ITEMS);
     // Keys — pressed
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x4FC3F7), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(0x1A1A2E), LV_PART_ITEMS | LV_STATE_PRESSED);
@@ -374,6 +378,7 @@ static void ui_task_fn(void *arg) {
                 s_cur_result = s_pending_result;
                 s_pending_result = nullptr;
                 header_set_loading(false);
+                s_loading = false;
                 ParseResult *result = s_cur_result;
                 if (result && result->count > 0 && !result->error) {
                     page_render(s_content, result, on_link_tap,
@@ -406,6 +411,25 @@ static void ui_task_fn(void *arg) {
                 }
                 lv_obj_scroll_to(s_content, 0, 0, LV_ANIM_OFF);
                 update_nav_buttons();
+            }
+            // Update loading KB counter once per second
+            if (s_loading) {
+                static uint32_t last_kb_update = 0;
+                static int last_kb_val = -1;
+                int kb = g_fetch_kb;
+                if (millis() - last_kb_update > 500) {
+                    last_kb_update = millis();
+                    last_kb_val = kb;
+                    lv_obj_t *lbl = lv_obj_get_child(s_content, 0);
+                    if (lbl) {
+                        char buf[32];
+                        if (kb > 0)
+                            snprintf(buf, sizeof(buf), "Loading... %dKB", kb);
+                        else
+                            snprintf(buf, sizeof(buf), "Loading...");
+                        lv_label_set_text(lbl, buf);
+                    }
+                }
             }
             // Periodic full invalidate — rounder_cb ensures all flushes are
             // sequential top-to-bottom, so this is safe at any interval
