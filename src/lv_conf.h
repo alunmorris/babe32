@@ -39,6 +39,7 @@
 #define LV_USE_BTN      1
 #define LV_USE_TEXTAREA 1
 #define LV_USE_KEYBOARD 1
+#define LV_USE_DROPDOWN 1
 #define LV_USE_SPINNER  1
 #define LV_USE_MSGBOX   1
 

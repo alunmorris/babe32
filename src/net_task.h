@@ -10,3 +10,6 @@ void net_task_start(page_ready_cb_t on_page_ready);
 
 // Request a page load (non-blocking, posts to queue)
 void net_task_load(const char *url);
+
+// Request a POST page load (non-blocking)
+void net_task_load_post(const char *url, const char *post_body);

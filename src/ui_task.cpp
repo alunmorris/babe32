@@ -18,8 +18,57 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
-#define HOMEPAGE "https://en.wikipedia.org/wiki/ESP32"
-#define KB_HEIGHT 120
+#define HOMEPAGE "https://html.duckduckgo.com/lite"
+#define KB_HEIGHT 150
+
+// --- Custom 5-row keyboard maps (number row on top) ---
+#define KB_BTN(w) (LV_BTNMATRIX_CTRL_POPOVER | (w))
+#define KB_SPEC   (LV_BTNMATRIX_CTRL_NO_REPEAT | LV_BTNMATRIX_CTRL_CLICK_TRIG | LV_BTNMATRIX_CTRL_CHECKED)
+
+static const char * const kb_map_lc[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_UP, "\n",
+    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", LV_SYMBOL_BACKSPACE, "\n",
+    "ABC", "a", "s", "d", "f", "g", "h", "j", "k", "l", LV_SYMBOL_NEW_LINE, "\n",
+    "1#", "z", "x", "c", "v", "b", "n", "m", ".", "/", "\n",
+    LV_SYMBOL_KEYBOARD, LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
+};
+static const lv_btnmatrix_ctrl_t kb_ctrl_lc[] = {
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_SPEC | 4,
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 6,
+    KB_SPEC | 6, KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 6,
+    KB_SPEC | 5, KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4),
+    KB_SPEC | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6, LV_BTNMATRIX_CTRL_CHECKED | 2, KB_SPEC | 2
+};
+
+static const char * const kb_map_uc[] = {
+    "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", LV_SYMBOL_UP, "\n",
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", LV_SYMBOL_BACKSPACE, "\n",
+    "abc", "A", "S", "D", "F", "G", "H", "J", "K", "L", LV_SYMBOL_NEW_LINE, "\n",
+    "1#", "Z", "X", "C", "V", "B", "N", "M", ",", ":", "\n",
+    LV_SYMBOL_KEYBOARD, LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
+};
+static const lv_btnmatrix_ctrl_t kb_ctrl_uc[] = {
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_SPEC | 4,
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 6,
+    KB_SPEC | 6, KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 6,
+    KB_SPEC | 5, KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4),
+    KB_SPEC | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6, LV_BTNMATRIX_CTRL_CHECKED | 2, KB_SPEC | 2
+};
+
+static const char * const kb_map_spec[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_UP, "\n",
+    "+", "-", "*", "/", "=", "%", "!", "?", "#", "@", LV_SYMBOL_BACKSPACE, "\n",
+    "abc", "&", "_", "\\", "|", "(", ")", "[", "]", ";", LV_SYMBOL_NEW_LINE, "\n",
+    "<", ">", "{", "}", "\"", "'", "~", "`", "$", "^", "\n",
+    LV_SYMBOL_KEYBOARD, LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
+};
+static const lv_btnmatrix_ctrl_t kb_ctrl_spec[] = {
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_SPEC | 4,
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 6,
+    KB_SPEC | 6, KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), LV_BTNMATRIX_CTRL_CHECKED | 6,
+    KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4), KB_BTN(4),
+    KB_SPEC | 2, LV_BTNMATRIX_CTRL_CHECKED | 2, 6, LV_BTNMATRIX_CTRL_CHECKED | 2, KB_SPEC | 2
+};
 
 static SemaphoreHandle_t s_lvgl_mutex    = nullptr;
 static lv_obj_t         *s_content       = nullptr;
@@ -56,6 +105,9 @@ static void on_forward() {
 static void on_link_tap(const char *url) {
     do_navigate(url);
 }
+static void on_home() {
+    do_navigate(HOMEPAGE);
+}
 static void update_nav_buttons() {
     header_set_back_enabled(history_can_back());
     header_set_forward_enabled(history_can_forward());
@@ -86,6 +138,41 @@ static void on_page_ready(ParseResult *result, const char *url) {
     if (s_ui_task_handle) xTaskNotifyGive(s_ui_task_handle);
 }
 
+static void on_form_submit(const char *action_url, bool is_post,
+                            const char *encoded_body) {
+    if (is_post) {
+        // POST: need to pass body through net_task
+        // For now, store body and navigate
+        history_push(action_url);
+        header_set_url(action_url);
+        update_nav_buttons();
+        if (lvgl_lock(50)) {
+            page_show_spinner(s_content);
+            header_set_loading(true);
+            lvgl_unlock();
+        }
+        g_fetch_kb = 0;
+        net_task_load_post(action_url, encoded_body);
+    } else {
+        // GET: append query string to action URL
+        char full_url[1024];
+        const char *sep = strchr(action_url, '?') ? "&" : "?";
+        snprintf(full_url, sizeof(full_url), "%s%s%s", action_url, sep, encoded_body);
+        do_navigate(full_url);
+    }
+}
+
+static void on_field_focus(lv_obj_t *textarea) {
+    if (!s_kb || !s_content || !s_show_btn) return;
+    lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_height(s_content, LV_VER_RES - 30 - KB_HEIGHT);
+    lv_keyboard_set_textarea(s_kb, textarea);
+    lv_textarea_set_cursor_pos(textarea, LV_TEXTAREA_CURSOR_LAST);
+    lv_obj_add_state(textarea, LV_STATE_FOCUSED);
+    s_kb_visible = true;
+}
+
 static void retry_btn_cb(lv_event_t *e) {
     retry_current();
 }
@@ -97,14 +184,42 @@ static void retry_current() {
 
 // --- Keyboard management ---
 
+static void kb_value_changed_cb(lv_event_t *e) {
+    uint16_t btn_id = lv_btnmatrix_get_selected_btn(s_kb);
+    if (btn_id == LV_BTNMATRIX_BTN_NONE) return;
+    const char *txt = lv_btnmatrix_get_btn_text(s_kb, btn_id);
+    if (txt && strcmp(txt, LV_SYMBOL_UP) == 0) {
+        // Default handler already typed the symbol — remove it
+        lv_obj_t *ta = lv_keyboard_get_textarea(s_kb);
+        if (ta) {
+            size_t sym_len = strlen(LV_SYMBOL_UP);
+            for (size_t i = 0; i < sym_len; i++) lv_textarea_del_char(ta);
+        }
+        lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF);
+    }
+}
+
 static void kb_event_cb(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_READY) {
-        // Enter pressed — navigate to typed URL and hide keyboard
-        const char *url = header_get_url_text();
-        if (url && url[0]) {
+        lv_obj_t *ta = lv_keyboard_get_textarea(s_kb);
+        if (ta == header_get_url_ta()) {
+            // Enter on URL bar — navigate
+            const char *url = header_get_url_text();
+            if (url && url[0]) {
+                kb_hide();
+                do_navigate(url);
+            }
+        } else {
+            // Enter on form field — submit the form
             kb_hide();
-            do_navigate(url);
+            if (s_cur_result && s_cur_result->form_action[0]) {
+                static char form_data[4096];
+                collect_form_data(s_content, s_cur_result,
+                                  form_data, sizeof(form_data));
+                on_form_submit(s_cur_result->form_action,
+                               s_cur_result->form_is_post, form_data);
+            }
         }
     } else if (code == LV_EVENT_CANCEL) {
         kb_hide();
@@ -145,7 +260,7 @@ void ui_build_root() {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x1A1A2E), 0);
 
-    header_create(scr, do_navigate, on_back, on_forward);
+    header_create(scr, do_navigate, on_back, on_forward, on_home);
 
     // Content area
     s_content = lv_obj_create(scr);
@@ -187,6 +302,14 @@ void ui_build_root() {
     lv_obj_set_style_bg_color(s_kb, lv_color_hex(0x0A2040), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_set_style_text_color(s_kb, lv_color_hex(0xE0E0E0), LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
+    // Apply custom 5-row maps
+    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_TEXT_LOWER,
+                        (const char **)kb_map_lc, kb_ctrl_lc);
+    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_TEXT_UPPER,
+                        (const char **)kb_map_uc, kb_ctrl_uc);
+    lv_keyboard_set_map(s_kb, LV_KEYBOARD_MODE_SPECIAL,
+                        (const char **)kb_map_spec, kb_ctrl_spec);
+    lv_obj_add_event_cb(s_kb, kb_value_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(s_kb, kb_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_kb, kb_event_cb, LV_EVENT_CANCEL, NULL);
 
@@ -253,7 +376,8 @@ static void ui_task_fn(void *arg) {
                 header_set_loading(false);
                 ParseResult *result = s_cur_result;
                 if (result && result->count > 0 && !result->error) {
-                    page_render(s_content, result, on_link_tap);
+                    page_render(s_content, result, on_link_tap,
+                               on_form_submit, on_field_focus);
                 } else {
                     page_clear(s_content);
                     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);

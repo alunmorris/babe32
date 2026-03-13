@@ -172,7 +172,7 @@ static int read_chunked_body(size_t body_start) {
     return (int)(out - body_start);
 }
 
-static int do_request(const char *url, size_t *total_out) {
+static int do_request(const char *url, const char *post_body, size_t *total_out) {
     *total_out = 0;
 
     if (!ensure_connected()) return 0;
@@ -187,17 +187,34 @@ static int do_request(const char *url, size_t *total_out) {
     memcpy(host, hs, hl);
 
     // Batch entire HTTP request into single write
-    char req[1024];
-    int req_len = snprintf(req, sizeof(req),
-        "GET %s HTTP/1.1\r\n"
-        "Host: %s\r\n"
-        "Proxy-Authorization: %s\r\n"
-        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
-        "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
-        "Accept-Language: en-US,en;q=0.5\r\n"
-        "Accept-Encoding: identity\r\n"
-        "Connection: keep-alive\r\n\r\n",
-        url, host, PROXY_AUTH);
+    char req[2048];
+    int req_len;
+    if (post_body) {
+        req_len = snprintf(req, sizeof(req),
+            "POST %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "Proxy-Authorization: %s\r\n"
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
+            "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
+            "Accept-Language: en-US,en;q=0.5\r\n"
+            "Accept-Encoding: identity\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: keep-alive\r\n\r\n"
+            "%s",
+            url, host, PROXY_AUTH, strlen(post_body), post_body);
+    } else {
+        req_len = snprintf(req, sizeof(req),
+            "GET %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "Proxy-Authorization: %s\r\n"
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
+            "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
+            "Accept-Language: en-US,en;q=0.5\r\n"
+            "Accept-Encoding: identity\r\n"
+            "Connection: keep-alive\r\n\r\n",
+            url, host, PROXY_AUTH);
+    }
 
     if (req_len >= (int)sizeof(req)) {
         dbg("Request too large for buffer");
@@ -205,7 +222,7 @@ static int do_request(const char *url, size_t *total_out) {
     }
 
     s_client->write((const uint8_t *)req, req_len);
-    dbg("Request sent (%d bytes, 1 write)", req_len);
+    dbg("%s sent (%d bytes, 1 write)", post_body ? "POST" : "GET", req_len);
     uint32_t t0 = millis();
 
     // Read response headers into fetch_buf
@@ -365,8 +382,8 @@ static int do_request(const char *url, size_t *total_out) {
     return status;
 }
 
-int fetch_page(const char *url, char **buf_out) {
-    dbg("fetch_page: alloc buf");
+static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
+    dbg("fetch: alloc buf");
     ensure_buf();
     if (!fetch_buf) {
         dbg("PSRAM alloc FAILED!");
@@ -380,17 +397,20 @@ int fetch_page(const char *url, char **buf_out) {
     strncpy(cur_url, url, sizeof(cur_url) - 1);
     cur_url[sizeof(cur_url) - 1] = '\0';
 
+    // Only send POST body on the first request; redirects become GET
+    const char *cur_body = post_body;
+
     for (int attempt = 0; attempt < 5; attempt++) {
         dbg("Attempt %d: %.40s", attempt + 1, cur_url);
         size_t total = 0;
-        int status = do_request(cur_url, &total);
+        int status = do_request(cur_url, cur_body, &total);
 
         if (status == 0 || total == 0) {
             // Connection failed — retry once with fresh connection
             if (attempt == 0 && s_client) {
                 dbg("Reconnecting after failure...");
                 s_client->stop();
-                status = do_request(cur_url, &total);
+                status = do_request(cur_url, cur_body, &total);
                 if (status == 0 || total == 0) {
                     dbg("Retry also failed");
                     return -1;
@@ -423,6 +443,7 @@ int fetch_page(const char *url, char **buf_out) {
             if (len >= sizeof(cur_url)) len = sizeof(cur_url) - 1;
             strncpy(cur_url, loc, len);
             cur_url[len] = '\0';
+            cur_body = nullptr;  // redirects become GET
             dbg("Redirect -> %.40s", cur_url);
             continue;
         }
@@ -433,4 +454,12 @@ int fetch_page(const char *url, char **buf_out) {
 
     dbg("Too many redirects");
     return -1;
+}
+
+int fetch_page(const char *url, char **buf_out) {
+    return fetch_impl(url, nullptr, buf_out);
+}
+
+int fetch_page_post(const char *url, const char *post_body, char **buf_out) {
+    return fetch_impl(url, post_body, buf_out);
 }

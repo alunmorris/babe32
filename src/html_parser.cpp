@@ -48,23 +48,28 @@ static bool tag_is(const char *name, size_t name_len, const char *match) {
 }
 
 static bool get_attr(const char *tag, const char *attr, char *out, size_t out_len) {
-    const char *p = strcasestr(tag, attr);
-    if (!p) return false;
-    p += strlen(attr);
-    while (*p == ' ') p++;
-    if (*p != '=') return false;
-    p++;
-    while (*p == ' ') p++;
-    char quote = 0;
-    if (*p == '"' || *p == '\'') quote = *p++;
-    size_t i = 0;
-    while (*p && i < out_len - 1) {
-        if (quote && *p == quote) break;
-        if (!quote && (*p == ' ' || *p == '>')) break;
-        out[i++] = *p++;
+    size_t alen = strlen(attr);
+    const char *p = tag;
+    while ((p = strcasestr(p, attr)) != NULL) {
+        // Must be preceded by whitespace (word boundary)
+        if (p > tag && !isspace((uint8_t)p[-1])) { p += alen; continue; }
+        const char *q = p + alen;
+        while (*q == ' ') q++;
+        if (*q != '=') { p += alen; continue; }
+        q++;
+        while (*q == ' ') q++;
+        char quote = 0;
+        if (*q == '"' || *q == '\'') quote = *q++;
+        size_t i = 0;
+        while (*q && i < out_len - 1) {
+            if (quote && *q == quote) break;
+            if (!quote && (*q == ' ' || *q == '>')) break;
+            out[i++] = *q++;
+        }
+        out[i] = '\0';
+        return i > 0;
     }
-    out[i] = '\0';
-    return i > 0;
+    return false;
 }
 
 static void decode_entities(char *s) {
@@ -112,6 +117,14 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
     bool     in_body   = false;
     bool     in_link   = false;
     char     link_href[512] = "";
+    // Form state
+    bool     in_select   = false;
+    int      select_elem = -1;       // index of current ELEM_SELECT in elems[]
+    char     select_name[128] = "";
+    static char select_opts[2048];   // \n-separated options for current <select>
+    size_t   select_opts_len = 0;
+    bool     in_textarea = false;
+    int      textarea_elem = -1;     // index of current ELEM_INPUT (textarea)
 
     const char *p = html;
 
@@ -227,6 +240,181 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
             } else {
                 in_link = false;
                 link_href[0] = '\0';
+            }
+        }
+        // Form
+        else if (tag_is(name, name_len, "form")) {
+            flush_acc();
+            if (!closing) {
+                char action_raw[512] = "";
+                get_attr(tag_str, "action", action_raw, sizeof(action_raw));
+                if (action_raw[0]) {
+                    char resolved[512];
+                    if (url_resolve(url_get_base(), action_raw,
+                                    resolved, sizeof(resolved)))
+                        strncpy(r->form_action, resolved, sizeof(r->form_action) - 1);
+                } else {
+                    strncpy(r->form_action, base_url, sizeof(r->form_action) - 1);
+                }
+                char method[16] = "get";
+                get_attr(tag_str, "method", method, sizeof(method));
+                r->form_is_post = (strcasecmp(method, "post") == 0);
+            }
+        }
+        // Input (self-closing)
+        else if (tag_is(name, name_len, "input") && !closing) {
+            flush_acc();
+            char itype[32] = "text";
+            char fname[128] = "";
+            char fvalue[256] = "";
+            char placeholder[128] = "";
+            get_attr(tag_str, "type", itype, sizeof(itype));
+            get_attr(tag_str, "name", fname, sizeof(fname));
+            get_attr(tag_str, "value", fvalue, sizeof(fvalue));
+            get_attr(tag_str, "placeholder", placeholder, sizeof(placeholder));
+
+            if (strcasecmp(itype, "hidden") == 0) {
+                if (r->count < MAX_ELEMENTS) {
+                    PageElement *e = &r->elems[r->count];
+                    memset(e, 0, sizeof(*e));
+                    e->type  = ELEM_HIDDEN;
+                    e->name  = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
+                    e->value = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
+                    r->count++;
+                }
+            } else if (strcasecmp(itype, "submit") == 0) {
+                const char *label = fvalue[0] ? fvalue : "Submit";
+                if (r->count < MAX_ELEMENTS) {
+                    PageElement *e = &r->elems[r->count];
+                    memset(e, 0, sizeof(*e));
+                    e->type  = ELEM_SUBMIT;
+                    e->text  = pool_add(r, label, strlen(label));
+                    e->name  = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
+                    e->value = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
+                    r->count++;
+                }
+            } else if (strcasecmp(itype, "text") == 0 ||
+                       strcasecmp(itype, "search") == 0 ||
+                       strcasecmp(itype, "email") == 0 ||
+                       strcasecmp(itype, "url") == 0 ||
+                       strcasecmp(itype, "password") == 0) {
+                if (r->count < MAX_ELEMENTS) {
+                    PageElement *e = &r->elems[r->count];
+                    memset(e, 0, sizeof(*e));
+                    e->type      = ELEM_INPUT;
+                    e->name      = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
+                    e->value     = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
+                    e->text      = placeholder[0] ? pool_add(r, placeholder, strlen(placeholder)) : NULL;
+                    e->multiline = false;
+                    r->count++;
+                }
+            }
+        }
+        // Textarea
+        else if (tag_is(name, name_len, "textarea")) {
+            flush_acc();
+            if (!closing) {
+                char fname[128] = "";
+                get_attr(tag_str, "name", fname, sizeof(fname));
+                if (r->count < MAX_ELEMENTS) {
+                    PageElement *e = &r->elems[r->count];
+                    memset(e, 0, sizeof(*e));
+                    e->type      = ELEM_INPUT;
+                    e->name      = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
+                    e->multiline = true;
+                    textarea_elem = r->count;
+                    in_textarea   = true;
+                    r->count++;
+                }
+            } else {
+                // Accumulated text becomes the textarea default value
+                if (in_textarea && textarea_elem >= 0 && acc_len > 0) {
+                    text_acc[acc_len] = '\0';
+                    decode_entities(text_acc);
+                    // Trim
+                    size_t s = 0;
+                    while (s < acc_len && isspace((uint8_t)text_acc[s])) s++;
+                    size_t e = strlen(text_acc);
+                    while (e > s && isspace((uint8_t)text_acc[e-1])) e--;
+                    if (e > s)
+                        r->elems[textarea_elem].value = pool_add(r, text_acc + s, e - s);
+                    acc_len = 0;
+                }
+                in_textarea   = false;
+                textarea_elem = -1;
+            }
+        }
+        // Select
+        else if (tag_is(name, name_len, "select")) {
+            flush_acc();
+            if (!closing) {
+                get_attr(tag_str, "name", select_name, sizeof(select_name));
+                select_opts_len = 0;
+                select_opts[0]  = '\0';
+                in_select = true;
+                // Create the element now; options filled on </select>
+                if (r->count < MAX_ELEMENTS) {
+                    PageElement *e = &r->elems[r->count];
+                    memset(e, 0, sizeof(*e));
+                    e->type = ELEM_SELECT;
+                    e->name = select_name[0] ? pool_add(r, select_name, strlen(select_name)) : NULL;
+                    select_elem = r->count;
+                    r->count++;
+                }
+            } else {
+                // Store accumulated options
+                if (in_select && select_elem >= 0 && select_opts_len > 0)
+                    r->elems[select_elem].value = pool_add(r, select_opts, select_opts_len);
+                in_select   = false;
+                select_elem = -1;
+            }
+        }
+        // Option (inside select) — capture text on close
+        else if (tag_is(name, name_len, "option") && in_select) {
+            if (closing && acc_len > 0) {
+                text_acc[acc_len] = '\0';
+                decode_entities(text_acc);
+                size_t s = 0;
+                while (s < acc_len && isspace((uint8_t)text_acc[s])) s++;
+                size_t e = strlen(text_acc);
+                while (e > s && isspace((uint8_t)text_acc[e-1])) e--;
+                if (e > s) {
+                    if (select_opts_len > 0 && select_opts_len < sizeof(select_opts) - 1)
+                        select_opts[select_opts_len++] = '\n';
+                    size_t len = e - s;
+                    if (select_opts_len + len < sizeof(select_opts) - 1) {
+                        memcpy(select_opts + select_opts_len, text_acc + s, len);
+                        select_opts_len += len;
+                        select_opts[select_opts_len] = '\0';
+                    }
+                }
+                acc_len = 0;
+            } else if (!closing) {
+                acc_len = 0;  // reset for new option text
+            }
+        }
+        // Button
+        else if (tag_is(name, name_len, "button")) {
+            if (!closing) {
+                flush_acc();  // flush prior text before button
+            } else {
+                // Accumulated text is button label
+                if (acc_len > 0) {
+                    text_acc[acc_len] = '\0';
+                    decode_entities(text_acc);
+                    size_t s = 0;
+                    while (s < acc_len && isspace((uint8_t)text_acc[s])) s++;
+                    size_t e = strlen(text_acc);
+                    while (e > s && isspace((uint8_t)text_acc[e-1])) e--;
+                    if (e > s && r->count < MAX_ELEMENTS) {
+                        PageElement *el = &r->elems[r->count];
+                        memset(el, 0, sizeof(*el));
+                        el->type = ELEM_SUBMIT;
+                        el->text = pool_add(r, text_acc + s, e - s);
+                        r->count++;
+                    }
+                    acc_len = 0;
+                }
             }
         }
         // Block elements — paragraph break

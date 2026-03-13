@@ -6,20 +6,28 @@
 
 static lv_obj_t *s_back_btn = nullptr;
 static lv_obj_t *s_url_ta   = nullptr;
+static lv_obj_t *s_home_btn = nullptr;
 
 static navigate_cb_t s_nav_cb  = nullptr;
 static back_cb_t     s_back_cb = nullptr;
+static home_cb_t     s_home_cb = nullptr;
 
 static void back_btn_cb(lv_event_t *e) {
     if (s_back_cb) s_back_cb();
 }
 
+static void home_btn_cb(lv_event_t *e) {
+    if (s_home_cb) s_home_cb();
+}
+
 lv_obj_t *header_create(lv_obj_t *parent,
                           navigate_cb_t on_navigate,
                           back_cb_t on_back,
-                          forward_cb_t on_forward) {
+                          forward_cb_t on_forward,
+                          home_cb_t on_home) {
     s_nav_cb  = on_navigate;
     s_back_cb = on_back;
+    s_home_cb = on_home;
 
     lv_obj_t *hdr = lv_obj_create(parent);
     lv_obj_set_size(hdr, LV_HOR_RES, 30);
@@ -45,9 +53,9 @@ lv_obj_t *header_create(lv_obj_t *parent,
     lv_obj_add_flag(s_back_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
 
-    // URL textarea (single line)
+    // URL textarea (single line) — leave room for home button on RHS
     s_url_ta = lv_textarea_create(hdr);
-    lv_obj_set_size(s_url_ta, LV_HOR_RES - 38, 26);
+    lv_obj_set_size(s_url_ta, LV_HOR_RES - 38 - 30, 26);
     lv_obj_set_pos(s_url_ta, 34, 0);
     lv_textarea_set_one_line(s_url_ta, true);
     lv_textarea_set_text(s_url_ta, "");
@@ -69,6 +77,18 @@ lv_obj_t *header_create(lv_obj_t *parent,
     lv_obj_set_style_radius(s_url_ta, 0, LV_PART_CURSOR);
     // No cursor blink — reduces redraws
     lv_obj_set_style_anim_time(s_url_ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
+
+    // Home button — RHS of URL bar
+    s_home_btn = lv_label_create(hdr);
+    lv_obj_set_size(s_home_btn, 30, 26);
+    lv_obj_set_pos(s_home_btn, LV_HOR_RES - 34, 0);
+    lv_label_set_text(s_home_btn, LV_SYMBOL_HOME);
+    lv_obj_set_style_text_color(s_home_btn, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(s_home_btn, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_pad_top(s_home_btn, 4, 0);
+    lv_obj_set_style_text_align(s_home_btn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(s_home_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_home_btn, home_btn_cb, LV_EVENT_CLICKED, NULL);
 
     return hdr;
 }

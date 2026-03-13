@@ -1,4 +1,5 @@
 // 060326 FreeRTOS network task on core 0
+// 130326 Add POST support for form submission
 #include "net_task.h"
 #include "fetcher.h"
 #include "dbglog.h"
@@ -7,26 +8,38 @@
 #include <freertos/queue.h>
 
 #define URL_MAX_LEN 512
+#define POST_BODY_MAX 4096
 
-static QueueHandle_t   s_url_queue = nullptr;
+// Queue item: URL + optional POST body
+struct NetRequest {
+    char url[URL_MAX_LEN];
+    char post_body[POST_BODY_MAX];  // empty string = GET
+};
+
+static QueueHandle_t   s_req_queue = nullptr;
 static page_ready_cb_t s_ready_cb  = nullptr;
 
 static void net_task_fn(void *arg) {
     dbg("net_task started, core %d", xPortGetCoreID());
-    char url_buf[URL_MAX_LEN];
+    NetRequest req;
     for (;;) {
         dbg("Waiting for URL...");
-        if (xQueueReceive(s_url_queue, url_buf, portMAX_DELAY) == pdTRUE) {
-            dbg("Got URL: %.40s", url_buf);
+        if (xQueueReceive(s_req_queue, &req, portMAX_DELAY) == pdTRUE) {
+            dbg("Got URL: %.40s %s", req.url, req.post_body[0] ? "(POST)" : "(GET)");
 
             char *html;
-            int n = fetch_page(url_buf, &html);
-            dbg("fetch_page returned %d", n);
+            int n;
+            if (req.post_body[0]) {
+                n = fetch_page_post(req.url, req.post_body, &html);
+            } else {
+                n = fetch_page(req.url, &html);
+            }
+            dbg("fetch returned %d", n);
 
             ParseResult *result = parse_result_alloc();
             if (n > 0 && result) {
                 dbg("Parsing HTML...");
-                html_parse(html, url_buf, result);
+                html_parse(html, req.url, result);
                 dbg("Parsed: %d elements", result->count);
             } else if (result) {
                 char msg[64];
@@ -48,21 +61,28 @@ static void net_task_fn(void *arg) {
                 dbg("Fetch failed: %s", msg);
             }
 
-            if (s_ready_cb) s_ready_cb(result, url_buf);
+            if (s_ready_cb) s_ready_cb(result, req.url);
         }
     }
 }
 
 void net_task_start(page_ready_cb_t on_page_ready) {
     s_ready_cb  = on_page_ready;
-    s_url_queue = xQueueCreate(3, URL_MAX_LEN);
+    s_req_queue = xQueueCreate(2, sizeof(NetRequest));
     xTaskCreatePinnedToCore(net_task_fn, "net_task", 32768, nullptr, 4, nullptr, 0);
 }
 
 void net_task_load(const char *url) {
-    if (!s_url_queue) return;
-    char buf[URL_MAX_LEN];
-    strncpy(buf, url, URL_MAX_LEN - 1);
-    buf[URL_MAX_LEN - 1] = '\0';
-    xQueueSend(s_url_queue, buf, pdMS_TO_TICKS(500));
+    if (!s_req_queue) return;
+    NetRequest req = {};
+    strncpy(req.url, url, URL_MAX_LEN - 1);
+    xQueueSend(s_req_queue, &req, pdMS_TO_TICKS(500));
+}
+
+void net_task_load_post(const char *url, const char *post_body) {
+    if (!s_req_queue) return;
+    NetRequest req = {};
+    strncpy(req.url, url, URL_MAX_LEN - 1);
+    if (post_body) strncpy(req.post_body, post_body, POST_BODY_MAX - 1);
+    xQueueSend(s_req_queue, &req, pdMS_TO_TICKS(500));
 }
