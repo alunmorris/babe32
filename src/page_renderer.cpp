@@ -38,6 +38,8 @@ void page_render(lv_obj_t *container, const ParseResult *result,
     s_link_cb = on_link_tap;
 
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_all(container, 8, 0);
     lv_obj_set_style_pad_gap(container, 4, 0);
 

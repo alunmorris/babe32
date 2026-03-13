@@ -39,17 +39,19 @@ void lvgl_unlock() {
 }
 
 static void do_navigate(const char *url);
+static void load_url(const char *url);
+static void retry_current();
 
 static void kb_show();
 static void kb_hide();
 
 static void on_back() {
     const char *url = history_back();
-    if (url) do_navigate(url);
+    if (url) load_url(url);
 }
 static void on_forward() {
     const char *url = history_forward();
-    if (url) do_navigate(url);
+    if (url) load_url(url);
 }
 static void on_link_tap(const char *url) {
     do_navigate(url);
@@ -59,8 +61,8 @@ static void update_nav_buttons() {
     header_set_forward_enabled(history_can_forward());
 }
 
-static void do_navigate(const char *url) {
-    history_push(url);
+// Load a URL without modifying history — used by back/forward/retry
+static void load_url(const char *url) {
     header_set_url(url);
     update_nav_buttons();
     if (lvgl_lock(50)) {
@@ -72,10 +74,25 @@ static void do_navigate(const char *url) {
     net_task_load(url);
 }
 
+// Navigate to a new URL — pushes to history
+static void do_navigate(const char *url) {
+    history_push(url);
+    load_url(url);
+}
+
 // Called from net task (core 0) — store result and notify core 1
 static void on_page_ready(ParseResult *result, const char *url) {
     s_pending_result = result;
     if (s_ui_task_handle) xTaskNotifyGive(s_ui_task_handle);
+}
+
+static void retry_btn_cb(lv_event_t *e) {
+    retry_current();
+}
+
+static void retry_current() {
+    const char *url = header_get_url_text();
+    if (url && url[0]) load_url(url);
 }
 
 // --- Keyboard management ---
@@ -235,14 +252,33 @@ static void ui_task_fn(void *arg) {
                 s_pending_result = nullptr;
                 header_set_loading(false);
                 ParseResult *result = s_cur_result;
-                if (result && result->count > 0) {
+                if (result && result->count > 0 && !result->error) {
                     page_render(s_content, result, on_link_tap);
                 } else {
                     page_clear(s_content);
+                    lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
+                    lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
+                                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
                     lv_obj_t *lbl = lv_label_create(s_content);
-                    lv_label_set_text(lbl, "Failed to load page.");
+                    // Show error text from net_task (includes HTTP status if available)
+                    const char *err_msg = (result && result->count > 0 && result->elems[0].text)
+                                          ? result->elems[0].text : "Failed to load page.";
+                    lv_label_set_text(lbl, err_msg);
                     lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
-                    lv_obj_center(lbl);
+                    // Retry button (flat label, clickable)
+                    lv_obj_t *btn = lv_label_create(s_content);
+                    lv_label_set_text(btn, "Retry");
+                    lv_obj_set_size(btn, 80, 32);
+                    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+                    lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
+                    lv_obj_set_style_text_color(btn, lv_color_hex(0x4FC3F7), 0);
+                    lv_obj_set_style_text_align(btn, LV_TEXT_ALIGN_CENTER, 0);
+                    lv_obj_set_style_pad_top(btn, 8, 0);
+                    lv_obj_set_style_radius(btn, 0, 0);
+                    lv_obj_set_style_shadow_width(btn, 0, 0);
+                    lv_obj_set_style_border_width(btn, 0, 0);
+                    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+                    lv_obj_add_event_cb(btn, retry_btn_cb, LV_EVENT_CLICKED, NULL);
                 }
                 lv_obj_scroll_to(s_content, 0, 0, LV_ANIM_OFF);
                 update_nav_buttons();

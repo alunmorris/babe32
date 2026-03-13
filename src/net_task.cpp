@@ -29,15 +29,23 @@ static void net_task_fn(void *arg) {
                 html_parse(html, url_buf, result);
                 dbg("Parsed: %d elements", result->count);
             } else if (result) {
-                const char *msg = "Error: could not load page.";
+                char msg[64];
+                if (n < -1) {
+                    int code = -n;
+                    snprintf(msg, sizeof(msg), "HTTP %d error", code);
+                    result->http_status = code;
+                } else {
+                    snprintf(msg, sizeof(msg), "Could not load page.");
+                }
                 result->elems[0].type  = ELEM_PARAGRAPH;
                 result->elems[0].level = 0;
                 result->elems[0].href  = NULL;
                 strncpy(result->text_pool, msg, sizeof(result->text_pool) - 1);
                 result->elems[0].text = result->text_pool;
                 result->count = 1;
+                result->error = true;
                 result->pool_used = strlen(msg) + 1;
-                dbg("Fetch failed, error page");
+                dbg("Fetch failed: %s", msg);
             }
 
             if (s_ready_cb) s_ready_cb(result, url_buf);

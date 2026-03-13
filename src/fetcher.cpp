@@ -428,7 +428,7 @@ int fetch_page(const char *url, char **buf_out) {
         }
 
         dbg("HTTP error %d", status);
-        return -1;
+        return -status;
     }
 
     dbg("Too many redirects");

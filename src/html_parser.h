@@ -22,7 +22,9 @@ typedef struct {
 typedef struct {
     PageElement elems[MAX_ELEMENTS];
     int         count;
-    char        text_pool[65536]; // 64KB inline text pool
+    bool        error;              // true if fetch/parse failed
+    int         http_status;        // HTTP status code (e.g. 404), 0 if unknown
+    char        text_pool[65536];   // 64KB inline text pool
     size_t      pool_used;
 } ParseResult;
 
