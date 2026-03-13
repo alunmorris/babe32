@@ -1,5 +1,6 @@
 // 110326 AXS15231 touch on I2C SDA=4 SCL=8 for JC3248W535C
 // 120326 Direct I2C driver — bb_captouch has AXS15231 behind #ifdef FUTURE
+// 130326 Transform portrait touch → landscape coordinates (CW 90°)
 #include "touch.h"
 #include "dbglog.h"
 #include <Arduino.h>
@@ -42,14 +43,16 @@ static uint32_t s_touch_dbg_count = 0;
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     uint16_t tx, ty;
     if (s_touch_ok && axs_read(&tx, &ty)) {
-        data->point.x = tx;
-        data->point.y = ty;
+        // Transform portrait touch → landscape (CW 90°)
+        data->point.x = ty;           // landscape x = portrait y
+        data->point.y = 319 - tx;     // landscape y = 319 - portrait x
         data->state   = LV_INDEV_STATE_PR;
-        g_touch_x = tx;
-        g_touch_y = ty;
+        g_touch_x = data->point.x;
+        g_touch_y = data->point.y;
         g_touch_pressed = true;
         if (s_touch_dbg_count < 5) {
-            dbg("TOUCH: x=%d y=%d", tx, ty);
+            dbg("TOUCH: raw(%d,%d) -> landscape(%d,%d)", tx, ty,
+                data->point.x, data->point.y);
             s_touch_dbg_count++;
         }
     } else {

@@ -2,6 +2,7 @@
 // 110326 Replace diagnostic loop with full LVGL + browser init
 // 120326 Fix cross-core rendering via task notification; sync flush + full invalidate
 // 120326 Add on-screen keyboard for URL entry
+// 130326 Reduce keyboard height for landscape layout
 #include "ui_task.h"
 #include "ui_header.h"
 #include "page_renderer.h"
@@ -18,7 +19,7 @@
 #include <freertos/task.h>
 
 #define HOMEPAGE "https://en.wikipedia.org/wiki/ESP32"
-#define KB_HEIGHT 180
+#define KB_HEIGHT 120
 
 static SemaphoreHandle_t s_lvgl_mutex    = nullptr;
 static lv_obj_t         *s_content       = nullptr;

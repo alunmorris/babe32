@@ -1,4 +1,5 @@
-// 110326 AXS15231B QSPI display driver for JC3248W535C (320x480 portrait)
+// 110326 AXS15231B QSPI display driver for JC3248W535C
+// 130326 Landscape 480x320 via software rotation in flush callback
 #pragma once
 #include <lvgl.h>
 

@@ -1,4 +1,5 @@
-// 110326 AXS15231B QSPI display driver for JC3248W535C (480x320 landscape)
+// 110326 AXS15231B QSPI display driver for JC3248W535C
+// 130326 Landscape 480x320 via software rotation in flush callback
 #include "display.h"
 #include <Arduino.h>
 #include <esp_lcd_panel_io.h>
@@ -18,19 +19,20 @@
 #define LCD_DATA2   40   // WP   / SPI D2
 #define LCD_DATA3   39   // HD   / SPI D3
 
-// Native portrait: 320 wide x 480 tall.
-// LVGL software rotation (LV_DISP_ROT_90) presents a landscape 480x320 surface to the app.
-// Hardware MADCTL rotation (swap_xy + mirror) is NOT used: without explicit RASET in QSPI
-// mode it corrupts the write window.
-#define LCD_H_RES   320
-#define LCD_V_RES   480
+// Physical portrait panel: 320 wide x 480 tall.
+// Hardware MADCTL rotation is NOT used (corrupts write window in QSPI mode).
+// Instead, LVGL renders landscape 480x320 into PSRAM, and the flush callback
+// rotates pixels into portrait strips for DMA to the display.
+#define LCD_H_RES   320   // physical portrait width
+#define LCD_V_RES   480   // physical portrait height
+#define LANDSCAPE_W 480   // LVGL landscape width
+#define LANDSCAPE_H 320   // LVGL landscape height
 
-// Rows per DMA transfer — must fit in internal DMA-capable RAM.
-// 480 px * 32 rows * 2 bytes = 30720 B; well within ~300 KB available internal heap.
+// Portrait rows per DMA strip — 320 * 60 * 2 = 38,400 bytes internal RAM
 #define DMA_CHUNK_ROWS 60
 
-static lv_color_t            *buf1         = nullptr;
-static lv_color_t            *buf2         = nullptr;
+static lv_color_t            *buf1         = nullptr;   // PSRAM landscape framebuffer
+static lv_color_t            *s_dma_out    = nullptr;   // internal DMA portrait strip
 static lv_disp_draw_buf_t     draw_buf;
 static lv_disp_drv_t          disp_drv;
 static esp_lcd_panel_handle_t  panel_handle = nullptr;
@@ -82,28 +84,35 @@ static bool IRAM_ATTR on_color_trans_done(esp_lcd_panel_io_handle_t panel_io,
     return woken == pdTRUE;
 }
 
-// AXS15231B QSPI: RAMWRC ignores CASET/RASET and continues from last write.
-// Non-contiguous partial updates (e.g. header then keyboard) cause corruption.
-// Force every dirty region to start at y=0 so LVGL always flushes top-to-bottom
-// sequentially: RAMWR at y=0, then RAMWRC continuing in order.
-static void lvgl_rounder_cb(lv_disp_drv_t *drv, lv_area_t *area) {
-    area->x1 = 0;
-    area->x2 = LCD_H_RES - 1;
-    area->y1 = 0;
-    // Round y2 up to next chunk boundary for alignment
-    area->y2 = ((area->y2 / DMA_CHUNK_ROWS) + 1) * DMA_CHUNK_ROWS - 1;
-    if (area->y2 >= LCD_V_RES) area->y2 = LCD_V_RES - 1;
-}
+// Landscape→portrait rotation flush.
+// LVGL renders 480×320 landscape into PSRAM.  This callback rotates pixels
+// into 320-wide portrait strips in internal DMA RAM and sends them to the
+// AXS15231B top-to-bottom (RAMWR at y=0, then RAMWRC continuing).
+// CW 90°: portrait (px, py) = (319 - ly, lx)
+static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area,
+                           lv_color_t *color_map) {
+    for (int py_start = 0; py_start < LCD_V_RES; py_start += DMA_CHUNK_ROWS) {
+        int py_end = py_start + DMA_CHUNK_ROWS;
+        if (py_end > LCD_V_RES) py_end = LCD_V_RES;
 
-static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map) {
-    // Drain any stale semaphore from display_clear/fill_solid DMA calls
-    xSemaphoreTake(s_flush_done, 0);
-    esp_lcd_panel_draw_bitmap(panel_handle,
-                              area->x1, area->y1,
-                              area->x2 + 1, area->y2 + 1,
-                              color_map);
-    // Wait for DMA to finish before telling LVGL the buffer is free
-    xSemaphoreTake(s_flush_done, pdMS_TO_TICKS(100));
+        // Rotate: iterate landscape rows (ly) for source cache-friendliness.
+        // Each landscape row ly maps to portrait column px = 319 - ly.
+        for (int ly = 0; ly < LANDSCAPE_H; ly++) {
+            int px = (LANDSCAPE_H - 1) - ly;
+            const lv_color_t *src_row = &color_map[ly * LANDSCAPE_W];
+            for (int py = py_start; py < py_end; py++) {
+                int lx = py;  // portrait row = landscape x
+                s_dma_out[(py - py_start) * LCD_H_RES + px] = src_row[lx];
+            }
+        }
+
+        xSemaphoreTake(s_flush_done, 0);
+        esp_lcd_panel_draw_bitmap(panel_handle,
+                                  0, py_start, LCD_H_RES, py_end,
+                                  s_dma_out);
+        xSemaphoreTake(s_flush_done, pdMS_TO_TICKS(200));
+    }
+
     lv_disp_flush_ready(drv);
 }
 
@@ -186,30 +195,33 @@ void display_init() {
 }
 
 void display_lvgl_init() {
-    // SPI2 DMA cannot source directly from PSRAM on pioarduino/IDF5 Arduino.
-    // Use internal DMA-capable RAM for the draw buffer; partial refresh avoids
-    // needing a full-screen buffer (307 KB would not fit in internal RAM anyway).
-    size_t buf_size = LCD_H_RES * DMA_CHUNK_ROWS * sizeof(lv_color_t);
-    buf1 = (lv_color_t *)heap_caps_malloc(buf_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    // Full landscape frame in PSRAM — LVGL draws here (no DMA involved in drawing)
+    size_t fb_pixels = LANDSCAPE_W * LANDSCAPE_H;
+    buf1 = (lv_color_t *)heap_caps_malloc(fb_pixels * sizeof(lv_color_t),
+                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     assert(buf1);
 
-    lv_disp_draw_buf_init(&draw_buf, buf1, nullptr, LCD_H_RES * DMA_CHUNK_ROWS);
+    // Portrait DMA output strip — internal RAM for SPI2 DMA
+    size_t dma_size = LCD_H_RES * DMA_CHUNK_ROWS * sizeof(lv_color_t);
+    s_dma_out = (lv_color_t *)heap_caps_malloc(dma_size,
+                                                MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    assert(s_dma_out);
+
+    lv_disp_draw_buf_init(&draw_buf, buf1, nullptr, fb_pixels);
 
     lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res      = LCD_H_RES;   // 320
-    disp_drv.ver_res      = LCD_V_RES;   // 480
+    disp_drv.hor_res      = LANDSCAPE_W;  // 480
+    disp_drv.ver_res      = LANDSCAPE_H;  // 320
     disp_drv.flush_cb     = lvgl_flush_cb;
     disp_drv.draw_buf     = &draw_buf;
-    disp_drv.full_refresh = 0;
-    disp_drv.rounder_cb  = lvgl_rounder_cb;
+    disp_drv.full_refresh = 1;            // always full frame for rotation
     lv_disp_drv_register(&disp_drv);
-    Serial.println("LVGL display driver registered (320x480 portrait)");
+    Serial.println("LVGL display driver registered (480x320 landscape, sw rotation)");
 }
 
 static inline uint16_t swap16(uint16_t v) { return (v >> 8) | (v << 8); }
 
-// One-chunk internal DMA buffer — reused across calls, never freed.
-// Size: LCD_H_RES * DMA_CHUNK_ROWS * 2 bytes (320*32*2 = 20 KB)
+// One-chunk internal DMA buffer for fill_solid/test — reused, never freed.
 static uint16_t *s_dma_chunk = nullptr;
 
 static void fill_solid(uint16_t colour) {
