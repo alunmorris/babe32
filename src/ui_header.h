@@ -24,3 +24,6 @@ lv_obj_t *header_get_url_ta();
 
 // Get current text from URL bar
 const char *header_get_url_text();
+
+// Show/hide the header bar
+void header_set_visible(bool visible);

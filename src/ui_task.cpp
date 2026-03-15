@@ -19,6 +19,7 @@
 #include <freertos/task.h>
 
 #define HOMEPAGE "https://html.duckduckgo.com/lite"
+#define AICHAT_URL "https://webmashing.com/aichat.php"
 #define KB_HEIGHT 150
 
 // --- Custom 5-row keyboard maps (number row on top) ---
@@ -79,6 +80,7 @@ static ParseResult      *s_cur_result    = nullptr;
 static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
 static bool              s_loading       = false;
+static char              s_pending_url[512] = "";
 volatile int             g_fetch_kb = 0;
 
 bool lvgl_lock(uint32_t ms) {
@@ -106,8 +108,56 @@ static void on_forward() {
 static void on_link_tap(const char *url) {
     do_navigate(url);
 }
+static void show_boot_menu();
+
+struct MenuItem { const char *label; const char *url; };
+static const MenuItem s_menu[] = {
+    {"Search", HOMEPAGE},
+    {"AI Chat", AICHAT_URL},
+};
+static const int s_menu_count = sizeof(s_menu) / sizeof(s_menu[0]);
+
+static void menu_item_cb(lv_event_t *e) {
+    const char *url = (const char *)lv_event_get_user_data(e);
+    if (url) do_navigate(url);
+}
+
+static void show_boot_menu() {
+    if (!lvgl_lock(50)) return;
+    // Restore header if hidden (e.g. returning from AI chat)
+    header_set_visible(true);
+    lv_obj_set_pos(s_content, 0, 30);
+    lv_obj_set_height(s_content, LV_VER_RES - 30);
+    page_clear(s_content);
+    lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // Title
+    lv_obj_t *title = lv_label_create(s_content);
+    lv_label_set_text(title, "MINT");
+    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_pad_bottom(title, 16, 0);
+
+    // Menu items
+    for (int i = 0; i < s_menu_count; i++) {
+        lv_obj_t *item = lv_label_create(s_content);
+        lv_label_set_text(item, s_menu[i].label);
+        lv_obj_set_style_text_color(item, lv_color_hex(0x4FC3F7), 0);
+        lv_obj_set_style_text_font(item, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_pad_all(item, 8, 0);
+        lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(item, menu_item_cb, LV_EVENT_CLICKED,
+                            (void *)s_menu[i].url);
+    }
+
+    header_set_url("");
+    lvgl_unlock();
+}
+
 static void on_home() {
-    do_navigate(HOMEPAGE);
+    show_boot_menu();
 }
 static void update_nav_buttons() {
     header_set_back_enabled(history_can_back());
@@ -116,9 +166,15 @@ static void update_nav_buttons() {
 
 // Load a URL without modifying history — used by back/forward/retry
 static void load_url(const char *url) {
-    header_set_url(url);
+    bool aichat = strstr(url, AICHAT_URL) != nullptr;
+    header_set_url(aichat ? "" : url);
     update_nav_buttons();
     if (lvgl_lock(50)) {
+        if (aichat) {
+            header_set_visible(false);
+            lv_obj_set_pos(s_content, 0, 0);
+            lv_obj_set_height(s_content, LV_VER_RES);
+        }
         page_show_spinner(s_content);
         header_set_loading(true);
         lvgl_unlock();
@@ -137,16 +193,17 @@ static void do_navigate(const char *url) {
 // Called from net task (core 0) — store result and notify core 1
 static void on_page_ready(ParseResult *result, const char *url) {
     s_pending_result = result;
+    strncpy(s_pending_url, url ? url : "", sizeof(s_pending_url) - 1);
+    s_pending_url[sizeof(s_pending_url) - 1] = '\0';
     if (s_ui_task_handle) xTaskNotifyGive(s_ui_task_handle);
 }
 
 static void on_form_submit(const char *action_url, bool is_post,
                             const char *encoded_body) {
     if (is_post) {
-        // POST: need to pass body through net_task
-        // For now, store body and navigate
         history_push(action_url);
-        header_set_url(action_url);
+        bool aichat = strstr(action_url, AICHAT_URL) != nullptr;
+        header_set_url(aichat ? "" : action_url);
         update_nav_buttons();
         if (lvgl_lock(50)) {
             page_show_spinner(s_content);
@@ -165,15 +222,22 @@ static void on_form_submit(const char *action_url, bool is_post,
     }
 }
 
+static int hdr_height() {
+    return lv_obj_get_y(s_content);  // 0 if header hidden, 30 otherwise
+}
+
 static void on_field_focus(lv_obj_t *textarea) {
     if (!s_kb || !s_content || !s_show_btn) return;
     lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_height(s_content, LV_VER_RES - 30 - KB_HEIGHT);
+    lv_obj_set_height(s_content, LV_VER_RES - hdr_height() - KB_HEIGHT);
     lv_keyboard_set_textarea(s_kb, textarea);
     lv_textarea_set_cursor_pos(textarea, LV_TEXTAREA_CURSOR_LAST);
     lv_obj_add_state(textarea, LV_STATE_FOCUSED);
     s_kb_visible = true;
+    // Force layout recalc after resize, then scroll textarea into view
+    lv_obj_update_layout(s_content);
+    lv_obj_scroll_to_view(textarea, LV_ANIM_OFF);
 }
 
 static void retry_btn_cb(lv_event_t *e) {
@@ -220,6 +284,19 @@ static void kb_event_cb(lv_event_t *e) {
                 static char form_data[4096];
                 collect_form_data(s_content, s_cur_result,
                                   form_data, sizeof(form_data));
+                // Include first submit button's name=value (server needs it)
+                for (int i = 0; i < s_cur_result->count; i++) {
+                    const PageElement *e = &s_cur_result->elems[i];
+                    if (e->type == ELEM_SUBMIT && e->name) {
+                        size_t w = strlen(form_data);
+                        if (w > 0) { form_data[w++] = '&'; form_data[w] = '\0'; }
+                        strncat(form_data + w, e->name, sizeof(form_data) - w - 1);
+                        strncat(form_data, "=", sizeof(form_data) - strlen(form_data) - 1);
+                        if (e->value)
+                            strncat(form_data, e->value, sizeof(form_data) - strlen(form_data) - 1);
+                        break;
+                    }
+                }
                 on_form_submit(s_cur_result->form_action,
                                s_cur_result->form_is_post, form_data);
             }
@@ -253,7 +330,7 @@ static void kb_hide() {
     if (!s_kb || !s_content || !s_show_btn) return;
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_height(s_content, LV_VER_RES - 30);
+    lv_obj_set_height(s_content, LV_VER_RES - hdr_height());
     lv_obj_clear_state(header_get_url_ta(), LV_STATE_FOCUSED);
     lv_keyboard_set_textarea(s_kb, NULL);
     s_kb_visible = false;
@@ -367,7 +444,7 @@ static void ui_task_fn(void *arg) {
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    do_navigate(HOMEPAGE);
+    show_boot_menu();
 
     // LVGL tick loop
     for (;;) {
@@ -409,7 +486,15 @@ static void ui_task_fn(void *arg) {
                     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
                     lv_obj_add_event_cb(btn, retry_btn_cb, LV_EVENT_CLICKED, NULL);
                 }
-                lv_obj_scroll_to(s_content, 0, 0, LV_ANIM_OFF);
+                // AI chat mode: hide header, use full height, scroll to bottom
+                bool is_aichat = strstr(s_pending_url, AICHAT_URL) != nullptr;
+                header_set_visible(!is_aichat);
+                lv_obj_set_pos(s_content, 0, is_aichat ? 0 : 30);
+                lv_obj_set_height(s_content, is_aichat ? LV_VER_RES : LV_VER_RES - 30);
+                if (is_aichat)
+                    lv_obj_scroll_to(s_content, 0, LV_COORD_MAX, LV_ANIM_OFF);
+                else
+                    lv_obj_scroll_to(s_content, 0, 0, LV_ANIM_OFF);
                 update_nav_buttons();
             }
             // Update loading KB counter once per second

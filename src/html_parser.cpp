@@ -25,15 +25,92 @@ static char *pool_add(ParseResult *r, const char *text, size_t len) {
     return p;
 }
 
+// Parse a CSS color name or #hex value. Returns 0xRRGGBB | 0x01000000, or 0 on failure.
+static uint32_t parse_css_color(const char *s) {
+    while (*s == ' ') s++;
+    if (*s == '#') {
+        s++;
+        unsigned long v = strtoul(s, nullptr, 16);
+        size_t len = 0;
+        while (isxdigit((uint8_t)s[len])) len++;
+        if (len == 3)
+            v = ((v & 0xF00) << 8 | (v & 0x0F0) << 4 | (v & 0x00F)) * 0x11;
+        else if (len != 6)
+            return 0;
+        return (uint32_t)v | 0x01000000;
+    }
+    // Named colors (common subset)
+    struct { const char *name; uint32_t val; } names[] = {
+        {"black",   0x000000}, {"white",   0xFFFFFF}, {"red",     0xFF0000},
+        {"green",   0x008000}, {"blue",    0x0000FF}, {"yellow",  0xFFFF00},
+        {"cyan",    0x00FFFF}, {"magenta", 0xFF00FF}, {"orange",  0xFFA500},
+        {"purple",  0x800080}, {"gray",    0x808080}, {"grey",    0x808080},
+        {"lime",    0x00FF00}, {"navy",    0x000080}, {"teal",    0x008080},
+        {"brown",   0xA52A2A}, {"silver",  0xC0C0C0}, {"maroon", 0x800000},
+        {"pink",    0xFFC0CB}, {"coral",   0xFF7F50},
+    };
+    for (auto &n : names) {
+        if (strcasecmp(s, n.name) == 0) return n.val | 0x01000000;
+    }
+    return 0;
+}
+
+// Extract color from style attribute, e.g. style="color:blue"
+static uint32_t parse_style_color(const char *tag_str) {
+    char style[256] = "";
+    // Manual extraction - get_attr would work but style values can contain semicolons
+    const char *sp = strcasestr(tag_str, "style");
+    if (!sp) return 0;
+    sp += 5;
+    while (*sp == ' ' || *sp == '=') sp++;
+    char quote = *sp;
+    if (quote != '"' && quote != '\'') return 0;
+    sp++;
+    const char *end = strchr(sp, quote);
+    if (!end) return 0;
+    size_t len = (size_t)(end - sp);
+    if (len >= sizeof(style)) len = sizeof(style) - 1;
+    memcpy(style, sp, len);
+    style[len] = '\0';
+
+    // Find "color:" (but not "background-color:")
+    char *cp = style;
+    while ((cp = strcasestr(cp, "color")) != nullptr) {
+        // Make sure it's not "background-color"
+        if (cp > style && cp[-1] != ' ' && cp[-1] != ';' && cp[-1] != '"') {
+            cp += 5;
+            continue;
+        }
+        cp += 5;
+        while (*cp == ' ' || *cp == ':') cp++;
+        // Extract value until ; or end
+        char val[64];
+        size_t vi = 0;
+        while (*cp && *cp != ';' && *cp != '"' && *cp != '\'' && vi < sizeof(val) - 1) {
+            val[vi++] = *cp++;
+        }
+        val[vi] = '\0';
+        // Trim trailing spaces
+        while (vi > 0 && val[vi-1] == ' ') val[--vi] = '\0';
+        uint32_t c = parse_css_color(val);
+        if (c) return c;
+        break;
+    }
+    return 0;
+}
+
 static bool add_elem(ParseResult *r, ElemType type, const char *text,
-                     size_t text_len, const char *href, uint8_t level) {
+                     size_t text_len, const char *href, uint8_t level,
+                     bool bold = false, uint32_t color = 0) {
     if (r->count >= MAX_ELEMENTS) return false;
     if (type != ELEM_LINEBREAK && text_len == 0) return true;
     PageElement *e = &r->elems[r->count];
+    memset(e, 0, sizeof(*e));
     e->type  = type;
     e->level = level;
+    e->bold  = bold;
+    e->color = color;
     e->text  = pool_add(r, text, text_len);
-    e->href  = NULL;
     if (type == ELEM_LINK && href)
         e->href = pool_add(r, href, strlen(href));
     if (e->text || type == ELEM_LINEBREAK) r->count++;
@@ -125,6 +202,11 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
     size_t   select_opts_len = 0;
     bool     in_textarea = false;
     int      textarea_elem = -1;     // index of current ELEM_INPUT (textarea)
+    bool     in_bold = false;
+    bool     acc_all_bold = true;   // true if ALL accumulated text is bold
+    uint32_t cur_color = 0;        // current inline color (0 = default)
+    uint32_t acc_color = 0;        // color seen during accumulation
+    int      color_depth = 0;      // nesting depth of color-setting tags
 
     const char *p = html;
 
@@ -141,9 +223,11 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
                 add_elem(r, in_link ? ELEM_LINK : cur_type,
                          text_acc + start, len,
                          in_link ? link_href : NULL,
-                         cur_level);
+                         cur_level, acc_all_bold, acc_color);
             }
             acc_len = 0;
+            acc_all_bold = true;
+            acc_color = cur_color;
         }
     };
 
@@ -163,6 +247,8 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
                         text_acc[acc_len++] = ' ';
                 } else {
                     text_acc[acc_len++] = *p;
+                    if (!in_bold) acc_all_bold = false;
+                    if (cur_color) acc_color = cur_color;
                 }
             }
             p++;
@@ -217,7 +303,14 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
         // Paragraphs
         else if (tag_is(name, name_len, "p")) {
             flush_acc();
-            if (!closing) { cur_type = ELEM_PARAGRAPH; cur_level = 0; }
+            if (!closing) {
+                cur_type = ELEM_PARAGRAPH; cur_level = 0;
+                uint32_t c = parse_style_color(tag_str);
+                if (c) { cur_color = c; color_depth++; }
+            } else if (color_depth > 0) {
+                color_depth--;
+                if (color_depth == 0) cur_color = 0;
+            }
         }
         // Line break
         else if (tag_is(name, name_len, "br")) {
@@ -240,6 +333,31 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
             } else {
                 in_link = false;
                 link_href[0] = '\0';
+            }
+        }
+        // Bold — don't flush, to avoid creating line breaks
+        else if (tag_is(name, name_len, "b") ||
+                 tag_is(name, name_len, "strong")) {
+            in_bold = !closing;
+        }
+        // Inline color: <span style="color:...">, <font color="...">
+        else if (tag_is(name, name_len, "span") ||
+                 tag_is(name, name_len, "font")) {
+            if (!closing) {
+                uint32_t c = parse_style_color(tag_str);
+                // Also try <font color="...">
+                if (!c && tag_is(name, name_len, "font")) {
+                    char cval[64] = "";
+                    if (get_attr(tag_str, "color", cval, sizeof(cval)))
+                        c = parse_css_color(cval);
+                }
+                if (c) {
+                    cur_color = c;
+                    color_depth++;
+                }
+            } else if (color_depth > 0) {
+                color_depth--;
+                if (color_depth == 0) cur_color = 0;
             }
         }
         // Form
@@ -423,6 +541,15 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
                  tag_is(name, name_len, "td")  ||
                  tag_is(name, name_len, "tr")) {
             flush_acc();
+            if (tag_is(name, name_len, "div")) {
+                if (!closing) {
+                    uint32_t c = parse_style_color(tag_str);
+                    if (c) { cur_color = c; color_depth++; }
+                } else if (color_depth > 0) {
+                    color_depth--;
+                    if (color_depth == 0) cur_color = 0;
+                }
+            }
         }
 
         p = tag_end + 1;

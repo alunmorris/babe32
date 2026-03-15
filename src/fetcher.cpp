@@ -1,6 +1,7 @@
 // 060326 Fetch via Brightdata proxy, return raw HTML body, follow redirects
 // 120326 Persistent TLS connection, keep-alive, batched write, DNS cache
 #include "fetcher.h"
+#include "url_utils.h"
 #include "dbglog.h"
 #include <Arduino.h>
 #include <WiFi.h>
@@ -172,38 +173,48 @@ static int read_chunked_body(size_t body_start) {
     return (int)(out - body_start);
 }
 
+// Extract host and path from URL
+static void parse_url(const char *url, char *host, size_t host_len,
+                      const char **path_out) {
+    const char *hs = strstr(url, "://");
+    hs = hs ? hs + 3 : url;
+    const char *sl = strchr(hs, '/');
+    size_t hl = sl ? (size_t)(sl - hs) : strlen(hs);
+    if (hl >= host_len) hl = host_len - 1;
+    memcpy(host, hs, hl);
+    host[hl] = '\0';
+    *path_out = sl ? sl : "/";
+}
+
 static int do_request(const char *url, const char *post_body, size_t *total_out) {
     *total_out = 0;
 
-    if (!ensure_connected()) return 0;
+    // s_client must already be connected (proxy or direct)
+    if (!s_client || !s_client->connected()) return 0;
 
-    // Extract host from URL
-    const char *hs = strstr(url, "://");
-    hs = hs ? hs + 3 : url;
     char host[128] = {};
-    const char *sl = strchr(hs, '/');
-    size_t hl = sl ? (size_t)(sl - hs) : strlen(hs);
-    if (hl >= sizeof(host)) hl = sizeof(host) - 1;
-    memcpy(host, hs, hl);
+    const char *path;
+    parse_url(url, host, sizeof(host), &path);
 
     // Batch entire HTTP request into single write
     char req[2048];
     int req_len;
     if (post_body) {
+        // Direct connection: use path only, no proxy auth
         req_len = snprintf(req, sizeof(req),
             "POST %s HTTP/1.1\r\n"
             "Host: %s\r\n"
-            "Proxy-Authorization: %s\r\n"
             "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
             "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
             "Accept-Language: en-US,en;q=0.5\r\n"
             "Accept-Encoding: identity\r\n"
             "Content-Type: application/x-www-form-urlencoded\r\n"
             "Content-Length: %zu\r\n"
-            "Connection: keep-alive\r\n\r\n"
+            "Connection: close\r\n\r\n"
             "%s",
-            url, host, PROXY_AUTH, strlen(post_body), post_body);
+            path, host, strlen(post_body), post_body);
     } else {
+        // Proxy connection: use full URL, include proxy auth
         req_len = snprintf(req, sizeof(req),
             "GET %s HTTP/1.1\r\n"
             "Host: %s\r\n"
@@ -382,6 +393,30 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
     return status;
 }
 
+// Connect directly to target host (for POST — proxy doesn't support it)
+static bool ensure_direct(const char *url) {
+    char host[128] = {};
+    const char *path;
+    parse_url(url, host, sizeof(host), &path);
+
+    // Close any existing proxy connection — we'll reconnect later
+    if (s_client) { s_client->stop(); delete s_client; s_client = nullptr; }
+
+    s_client = new WiFiClientSecure();
+    s_client->setInsecure();
+    s_client->setTimeout(10);
+    dbg("Direct TLS connect %s:443...", host);
+    uint32_t t0 = millis();
+    if (!s_client->connect(host, 443)) {
+        dbg("Direct connect FAIL after %lums", millis() - t0);
+        delete s_client;
+        s_client = nullptr;
+        return false;
+    }
+    dbg("Direct TLS connected in %lums", millis() - t0);
+    return true;
+}
+
 static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
     dbg("fetch: alloc buf");
     ensure_buf();
@@ -402,23 +437,31 @@ static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
 
     for (int attempt = 0; attempt < 5; attempt++) {
         dbg("Attempt %d: %.40s", attempt + 1, cur_url);
+
+        // Connect: direct for POST, proxy for GET
+        if (cur_body) {
+            if (!ensure_direct(cur_url)) return -1;
+        } else {
+            if (!ensure_connected()) return -1;
+        }
+
         size_t total = 0;
         int status = do_request(cur_url, cur_body, &total);
 
+        // Clean up direct connection after use
+        if (cur_body && s_client) {
+            s_client->stop();
+            delete s_client;
+            s_client = nullptr;
+        }
+
         if (status == 0 || total == 0) {
-            // Connection failed — retry once with fresh connection
-            if (attempt == 0 && s_client) {
+            if (attempt == 0) {
                 dbg("Reconnecting after failure...");
-                s_client->stop();
-                status = do_request(cur_url, cur_body, &total);
-                if (status == 0 || total == 0) {
-                    dbg("Retry also failed");
-                    return -1;
-                }
-            } else {
-                dbg("No response");
-                return -1;
+                continue;  // retry via loop
             }
+            dbg("No response");
+            return -1;
         }
 
         if (status == 200) {
@@ -440,9 +483,18 @@ static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
             char *end = strstr(loc, "\r\n");
             if (!end) { dbg("Malformed Location"); return -1; }
             size_t len = (size_t)(end - loc);
-            if (len >= sizeof(cur_url)) len = sizeof(cur_url) - 1;
-            strncpy(cur_url, loc, len);
-            cur_url[len] = '\0';
+            char loc_str[512];
+            if (len >= sizeof(loc_str)) len = sizeof(loc_str) - 1;
+            strncpy(loc_str, loc, len);
+            loc_str[len] = '\0';
+            // Resolve relative redirects against current URL
+            char resolved[512];
+            if (!url_resolve(cur_url, loc_str, resolved, sizeof(resolved))) {
+                dbg("Cannot resolve redirect URL");
+                return -1;
+            }
+            strncpy(cur_url, resolved, sizeof(cur_url) - 1);
+            cur_url[sizeof(cur_url) - 1] = '\0';
             cur_body = nullptr;  // redirects become GET
             dbg("Redirect -> %.40s", cur_url);
             continue;

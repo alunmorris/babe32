@@ -14,6 +14,8 @@
 #define COLOUR_BTN_BG  lv_color_hex(0x0F3460)
 #define COLOUR_BTN_TXT lv_color_hex(0x4FC3F7)
 
+LV_FONT_DECLARE(lv_font_montserrat_bold_14);
+
 static link_tap_cb_t        s_link_cb       = nullptr;
 static form_submit_cb_t     s_submit_cb     = nullptr;
 static form_field_focus_cb_t s_focus_cb     = nullptr;
@@ -99,6 +101,19 @@ static void form_submit_click_cb(lv_event_t *e) {
 
     static char form_data[4096];
     collect_form_data(s_cur_container, s_cur_result, form_data, sizeof(form_data));
+
+    // Append clicked submit button's name=value if it has a name
+    const PageElement *btn_elem = (const PageElement *)lv_event_get_user_data(e);
+    if (btn_elem && btn_elem->name) {
+        size_t w = strlen(form_data);
+        if (w > 0 && w < sizeof(form_data) - 1) form_data[w++] = '&';
+        w += url_encode(btn_elem->name, form_data + w, sizeof(form_data) - w);
+        if (w < sizeof(form_data) - 1) form_data[w++] = '=';
+        if (btn_elem->value)
+            w += url_encode(btn_elem->value, form_data + w, sizeof(form_data) - w);
+        form_data[w] = '\0';
+    }
+
     s_submit_cb(s_cur_result->form_action, s_cur_result->form_is_post, form_data);
 }
 
@@ -157,8 +172,10 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_label_set_text(lbl, e->text);
                 lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
                 lv_obj_set_width(lbl, LV_PCT(100));
-                lv_obj_set_style_text_color(lbl, COLOUR_TEXT, 0);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+                lv_obj_set_style_text_color(lbl, e->color
+                    ? lv_color_hex(e->color & 0x00FFFFFF) : COLOUR_TEXT, 0);
+                lv_obj_set_style_text_font(lbl, e->bold ? &lv_font_montserrat_bold_14
+                                                        : &lv_font_montserrat_14, 0);
                 break;
             }
             case ELEM_LINK: {
@@ -166,8 +183,10 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_label_set_text(lbl, e->text);
                 lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
                 lv_obj_set_width(lbl, LV_PCT(100));
-                lv_obj_set_style_text_color(lbl, COLOUR_LINK, 0);
-                lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+                lv_obj_set_style_text_color(lbl, e->color
+                    ? lv_color_hex(e->color & 0x00FFFFFF) : COLOUR_LINK, 0);
+                lv_obj_set_style_text_font(lbl, e->bold ? &lv_font_montserrat_bold_14
+                                                        : &lv_font_montserrat_14, 0);
                 lv_obj_add_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_add_event_cb(lbl, link_event_cb, LV_EVENT_CLICKED,
                                     (void *)e->href);
@@ -222,7 +241,7 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_obj_set_style_border_width(btn, 0, 0);
                 lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_add_event_cb(btn, form_submit_click_cb,
-                                    LV_EVENT_CLICKED, NULL);
+                                    LV_EVENT_CLICKED, (void *)e);
                 break;
             }
             case ELEM_SELECT: {

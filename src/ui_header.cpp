@@ -4,6 +4,7 @@
 #include "ui_header.h"
 #include <Arduino.h>
 
+static lv_obj_t *s_hdr      = nullptr;
 static lv_obj_t *s_back_btn = nullptr;
 static lv_obj_t *s_url_ta   = nullptr;
 static lv_obj_t *s_home_btn = nullptr;
@@ -29,7 +30,8 @@ lv_obj_t *header_create(lv_obj_t *parent,
     s_back_cb = on_back;
     s_home_cb = on_home;
 
-    lv_obj_t *hdr = lv_obj_create(parent);
+    s_hdr = lv_obj_create(parent);
+    lv_obj_t *hdr = s_hdr;
     lv_obj_set_size(hdr, LV_HOR_RES, 30);
     lv_obj_set_pos(hdr, 0, 0);
     lv_obj_set_style_bg_color(hdr, lv_color_hex(0x0F3460), 0);
@@ -127,4 +129,10 @@ void header_set_loading(bool loading) {
         if (loading) lv_obj_add_state(s_url_ta, LV_STATE_DISABLED);
         else         lv_obj_clear_state(s_url_ta, LV_STATE_DISABLED);
     }
+}
+
+void header_set_visible(bool visible) {
+    if (!s_hdr) return;
+    if (visible) lv_obj_clear_flag(s_hdr, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_add_flag(s_hdr, LV_OBJ_FLAG_HIDDEN);
 }

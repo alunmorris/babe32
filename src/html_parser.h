@@ -22,6 +22,8 @@ typedef struct {
     char    *value;   // default value (ELEM_INPUT/HIDDEN) or options (ELEM_SELECT, \n-separated)
     uint8_t  level;   // 1-6 for ELEM_HEADING, 0 otherwise
     bool     multiline; // true for <textarea>
+    bool     bold;      // true if inside <b>/<strong>
+    uint32_t color;     // 0 = default, else 0xRRGGBB | 0x01000000 flag
 } PageElement;
 
 #define MAX_ELEMENTS 1024
