@@ -1,8 +1,11 @@
 // 060326 LVGL page renderer
 // 130326 Add form widget rendering (input, select, submit)
+// 160326 Add inline image rendering via proxy
 #include "page_renderer.h"
+#include "image_fetch.h"
 #include <Arduino.h>
 #include <string.h>
+#include <esp_heap_caps.h>
 
 #define COLOUR_BG      lv_color_hex(0x1A1A2E)
 #define COLOUR_TEXT    lv_color_hex(0xE0E0E0)
@@ -21,6 +24,74 @@ static form_submit_cb_t     s_submit_cb     = nullptr;
 static form_field_focus_cb_t s_focus_cb     = nullptr;
 static const ParseResult   *s_cur_result    = nullptr;
 static lv_obj_t            *s_cur_container = nullptr;
+
+// Image data cache — persists decoded image data while page is displayed
+#define MAX_PAGE_IMAGES 16
+struct ImgSlot {
+    lv_img_dsc_t dsc;
+    uint8_t *data;      // PSRAM allocation, freed on page_clear
+    lv_obj_t *widget;   // lv_img widget to update after fetch
+    const char *url;    // src URL (points into ParseResult text_pool)
+};
+static ImgSlot s_img_slots[MAX_PAGE_IMAGES];
+static int     s_img_count = 0;
+static int     s_img_fetch_idx = 0;
+
+// Full-size image overlay (async)
+static lv_obj_t    *s_overlay = nullptr;
+static lv_img_dsc_t s_full_dsc;
+static uint8_t     *s_full_data = nullptr;
+static const char  *s_full_pending_url = nullptr;  // set by click, cleared by main loop
+
+static void overlay_close_cb(lv_event_t *e) {
+    if (s_overlay) {
+        lv_obj_del(s_overlay);
+        s_overlay = nullptr;
+    }
+    if (s_full_data) {
+        heap_caps_free(s_full_data);
+        s_full_data = nullptr;
+    }
+    s_full_pending_url = nullptr;
+}
+
+static void create_overlay_base() {
+    if (s_overlay) lv_obj_del(s_overlay);
+    s_overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(s_overlay, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(s_overlay, 0, 0);
+    lv_obj_set_style_bg_opa(s_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_border_width(s_overlay, 0, 0);
+    lv_obj_set_style_pad_all(s_overlay, 0, 0);
+    lv_obj_set_style_radius(s_overlay, 0, 0);
+    lv_obj_add_flag(s_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_overlay, overlay_close_cb, LV_EVENT_CLICKED, NULL);
+}
+
+static void img_click_cb(lv_event_t *e) {
+    const char *url = (const char *)lv_event_get_user_data(e);
+    if (!url || s_full_pending_url) return;  // ignore if already fetching
+
+    s_full_pending_url = url;
+
+    // Show loading overlay immediately
+    create_overlay_base();
+    lv_obj_t *lbl = lv_label_create(s_overlay);
+    lv_label_set_text(lbl, "Loading...");
+    lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_center(lbl);
+}
+
+static void free_img_slots() {
+    for (int i = 0; i < s_img_count; i++) {
+        if (s_img_slots[i].data) {
+            heap_caps_free(s_img_slots[i].data);
+            s_img_slots[i].data = nullptr;
+        }
+    }
+    s_img_count = 0;
+}
 
 static void link_event_cb(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED && s_link_cb) {
@@ -118,22 +189,29 @@ static void form_submit_click_cb(lv_event_t *e) {
 }
 
 void page_clear(lv_obj_t *container) {
+    free_img_slots();
+    s_img_fetch_idx = 0;
+    if (s_overlay) { lv_obj_del(s_overlay); s_overlay = nullptr; }
+    if (s_full_data) { heap_caps_free(s_full_data); s_full_data = nullptr; }
     lv_obj_clean(container);
 }
 
 void page_show_spinner(lv_obj_t *container) {
     page_clear(container);
+    lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(container, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *lbl = lv_label_create(container);
     lv_label_set_text(lbl, "Loading...");
     lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
-    lv_obj_center(lbl);
 }
 
 void page_render(lv_obj_t *container, const ParseResult *result,
                  link_tap_cb_t on_link_tap,
                  form_submit_cb_t on_form_submit,
                  form_field_focus_cb_t on_field_focus,
-                 bool show_links) {
+                 bool show_links,
+                 bool show_images) {
     page_clear(container);
     s_link_cb       = on_link_tap;
     s_submit_cb     = on_form_submit;
@@ -209,7 +287,8 @@ void page_render(lv_obj_t *container, const ParseResult *result,
         merge_next = false;
 
         if (!e->text && e->type != ELEM_LINEBREAK &&
-            e->type != ELEM_INPUT && e->type != ELEM_SELECT) continue;
+            e->type != ELEM_INPUT && e->type != ELEM_SELECT &&
+            e->type != ELEM_IMAGE) continue;
 
         switch (e->type) {
             case ELEM_HEADING: {
@@ -219,9 +298,8 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_obj_set_width(lbl, LV_PCT(100));
                 lv_obj_set_style_text_color(lbl, COLOUR_HEADING, 0);
                 const lv_font_t *font = &lv_font_montserrat_16;
-                if      (e->level == 1) font = &lv_font_montserrat_24;
-                else if (e->level == 2) font = &lv_font_montserrat_20;
-                else if (e->level == 3) font = &lv_font_montserrat_18;
+                if      (e->level == 1) font = &lv_font_montserrat_18;
+                else if (e->level == 2) font = &lv_font_montserrat_18;
                 lv_obj_set_style_text_font(lbl, font, 0);
                 lv_obj_set_style_pad_top(lbl, 6, 0);
                 break;
@@ -318,8 +396,113 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_obj_set_user_data(dd, (void *)e->name);
                 break;
             }
+            case ELEM_IMAGE: {
+                if (!show_images) {
+                    break; // skip images entirely when disabled
+                } else if (e->href && s_img_count < MAX_PAGE_IMAGES) {
+                    // Create placeholder image widget
+                    lv_obj_t *img = lv_img_create(container);
+                    lv_obj_set_size(img, IMAGE_THUMB_W, 10); // placeholder height
+                    lv_obj_set_style_bg_opa(img, LV_OPA_50, 0);
+                    lv_obj_set_style_bg_color(img, lv_color_hex(0x333333), 0);
+                    // Make clickable for full-size view
+                    lv_obj_add_flag(img, LV_OBJ_FLAG_CLICKABLE);
+                    lv_obj_add_event_cb(img, img_click_cb, LV_EVENT_CLICKED,
+                                        (void *)e->href);
+                    // Queue for async fetch
+                    ImgSlot *slot = &s_img_slots[s_img_count++];
+                    memset(slot, 0, sizeof(*slot));
+                    slot->widget = img;
+                    slot->url = e->href;
+                }
+                break;
+            }
             default:
                 break;
         }
     }
+}
+
+bool page_img_next(int *index, const char **url) {
+    while (s_img_fetch_idx < s_img_count) {
+        ImgSlot *slot = &s_img_slots[s_img_fetch_idx];
+        if (slot->url && slot->widget && !slot->data) {
+            *index = s_img_fetch_idx;
+            *url = slot->url;
+            s_img_fetch_idx++;
+            return true;
+        }
+        s_img_fetch_idx++;
+    }
+    return false;
+}
+
+void page_img_set(int index, uint8_t *data, size_t len) {
+    if (index < 0 || index >= s_img_count) return;
+    ImgSlot *slot = &s_img_slots[index];
+    if (!slot->widget || !data || len == 0) return;
+    slot->data = data;
+    memset(&slot->dsc, 0, sizeof(slot->dsc));
+    slot->dsc.header.cf = LV_IMG_CF_RAW;
+    slot->dsc.data_size = len;
+    slot->dsc.data = data;
+
+    // Get actual decoded dimensions from LVGL decoder
+    lv_img_header_t hdr;
+    if (lv_img_decoder_get_info(&slot->dsc, &hdr) == LV_RES_OK) {
+        lv_obj_set_size(slot->widget, hdr.w, hdr.h);
+    } else {
+        lv_obj_set_size(slot->widget, IMAGE_THUMB_W, IMAGE_THUMB_H);
+    }
+    lv_img_set_src(slot->widget, &slot->dsc);
+}
+
+bool page_img_full_pending(const char **url) {
+    if (s_full_pending_url) {
+        *url = s_full_pending_url;
+        return true;
+    }
+    return false;
+}
+
+void page_img_full_set(uint8_t *data, size_t len) {
+    s_full_pending_url = nullptr;
+    if (!data || len == 0 || !s_overlay) return;
+
+    if (s_full_data) heap_caps_free(s_full_data);
+    s_full_data = data;
+
+    memset(&s_full_dsc, 0, sizeof(s_full_dsc));
+    s_full_dsc.header.cf = LV_IMG_CF_RAW;
+    s_full_dsc.data_size = len;
+    s_full_dsc.data = data;
+
+    lv_img_header_t hdr;
+    int img_w = IMAGE_FULL_W, img_h = IMAGE_FULL_H;
+    if (lv_img_decoder_get_info(&s_full_dsc, &hdr) == LV_RES_OK) {
+        img_w = hdr.w;
+        img_h = hdr.h;
+    }
+
+    // Replace loading text with image
+    lv_obj_clean(s_overlay);
+    lv_obj_add_event_cb(s_overlay, overlay_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *img = lv_img_create(s_overlay);
+    lv_obj_set_size(img, img_w, img_h);
+    lv_img_set_src(img, &s_full_dsc);
+    lv_obj_center(img);
+}
+
+void page_img_full_fail() {
+    s_full_pending_url = nullptr;
+    if (!s_overlay) return;
+
+    // Replace loading text with error
+    lv_obj_clean(s_overlay);
+    lv_obj_add_event_cb(s_overlay, overlay_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl = lv_label_create(s_overlay);
+    lv_label_set_text(lbl, "Failed to load image\nTap to close");
+    lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(lbl);
 }

@@ -1,4 +1,5 @@
 // 060326 Single-pass HTML tokenizer -> PageElement array in PSRAM
+// 160326 Add assume_body param to html_parse for partial HTML
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
@@ -11,7 +12,8 @@ typedef enum {
     ELEM_INPUT,      // text input or textarea
     ELEM_HIDDEN,     // hidden input (not rendered)
     ELEM_SUBMIT,     // submit button
-    ELEM_SELECT      // dropdown select
+    ELEM_SELECT,     // dropdown select
+    ELEM_IMAGE       // inline image (src in href, alt in text)
 } ElemType;
 
 typedef struct {
@@ -44,4 +46,6 @@ ParseResult *parse_result_alloc();
 void         parse_result_free(ParseResult *r);
 
 // Parse html_buf (null-terminated) into r. base_url used for link resolution.
-void html_parse(const char *html_buf, const char *base_url, ParseResult *r);
+// If assume_body is true, skip waiting for <body> tag (for partial/truncated HTML).
+void html_parse(const char *html_buf, const char *base_url, ParseResult *r,
+                bool assume_body = false);

@@ -6,6 +6,9 @@
 /* Resolution (informational — actual res set via display driver in LVGL 8) */
 #define LV_HOR_RES_MAX  480
 #define LV_VER_RES_MAX  320
+/* Use int32_t coordinates to avoid overflow on long pages (default int16_t caps at 32767px) */
+#define LV_USE_LARGE_COORD  1
+
 #define LV_COLOR_DEPTH       16
 #define LV_COLOR_16_SWAP     1   /* required for SPI: ESP32 is little-endian, display expects big-endian */
 
@@ -37,11 +40,16 @@
 /* Widgets needed */
 #define LV_USE_LABEL    1
 #define LV_USE_BTN      1
+#define LV_USE_IMG      1
 #define LV_USE_TEXTAREA 1
 #define LV_USE_KEYBOARD 1
 #define LV_USE_DROPDOWN 1
 #define LV_USE_SPINNER  1
 #define LV_USE_MSGBOX   1
+
+/* Image decoders */
+#define LV_USE_PNG      1
+#define LV_USE_SJPG     1
 
 /* Animation (LVGL 8 name) */
 #define LV_USE_ANIM     1

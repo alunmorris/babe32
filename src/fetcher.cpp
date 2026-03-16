@@ -1,6 +1,7 @@
 // 060326 Fetch via Brightdata proxy, return raw HTML body, follow redirects
 // 120326 Persistent TLS connection, keep-alive, batched write, DNS cache
 #include "fetcher.h"
+#include "image_fetch.h"
 #include "url_utils.h"
 #include "dbglog.h"
 #include <Arduino.h>
@@ -9,6 +10,7 @@
 
 extern volatile int g_fetch_kb;
 
+static volatile bool s_cancel = false;
 static char *fetch_buf = nullptr;
 
 static void ensure_buf() {
@@ -74,6 +76,9 @@ static bool ensure_connected() {
         return true;
     }
 
+    // Free image fetcher's TLS to reclaim internal RAM
+    image_fetch_disconnect();
+
     // DNS resolve (cached)
     if (!s_dns_cached) {
         dbg("DNS resolve %s...", PROXY_HOST);
@@ -107,6 +112,19 @@ void fetch_disconnect() {
     dbg("Fetch connection closed");
 }
 
+void fetch_cancel() {
+    s_cancel = true;
+    dbg("Fetch cancel requested");
+}
+
+bool fetch_cancelled() {
+    return s_cancel;
+}
+
+char *fetch_buf_ptr() {
+    return fetch_buf;
+}
+
 // Read exactly `len` bytes into fetch_buf starting at `offset`.
 // Returns bytes actually read.
 static size_t read_exact(size_t offset, size_t len) {
@@ -114,7 +132,7 @@ static size_t read_exact(size_t offset, size_t len) {
     size_t cap = FETCH_BUF_SIZE - 1;
     if (offset + len > cap) len = cap - offset;
     uint32_t idle = millis();
-    while (got < len && (s_client->connected() || s_client->available())) {
+    while (got < len && !s_cancel && (s_client->connected() || s_client->available())) {
         int av = s_client->available();
         if (av > 0) {
             size_t want = min((size_t)av, len - got);
@@ -136,7 +154,7 @@ static size_t read_until_close(size_t offset) {
     size_t total = 0;
     size_t cap = FETCH_BUF_SIZE - 1 - offset;
     uint32_t idle = millis();
-    while ((s_client->connected() || s_client->available()) && total < cap) {
+    while (!s_cancel && (s_client->connected() || s_client->available()) && total < cap) {
         int av = s_client->available();
         if (av > 0) {
             total += s_client->readBytes(fetch_buf + offset + total, min((size_t)av, cap - total));
@@ -158,12 +176,12 @@ static int read_chunked_body(size_t body_start) {
     size_t out = body_start;
     size_t cap = FETCH_BUF_SIZE - 1;
 
-    while (true) {
+    while (!s_cancel) {
         // Read chunk size line
         char line[16];
         size_t li = 0;
         uint32_t idle = millis();
-        while (li < sizeof(line) - 1) {
+        while (li < sizeof(line) - 1 && !s_cancel) {
             if (s_client->available()) {
                 char c;
                 s_client->readBytes((uint8_t *)&c, 1);
@@ -174,11 +192,12 @@ static int read_chunked_body(size_t body_start) {
                 break;
             } else if (millis() - idle > 10000) {
                 dbg("Chunked: timeout reading size");
-                return -1;
+                return (int)(out - body_start);  // return partial on timeout
             } else {
                 delay(1);
             }
         }
+        if (s_cancel) break;  // return partial data
         line[li] = '\0';
 
         unsigned long chunk_size = strtoul(line, nullptr, 16);
@@ -285,7 +304,7 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
     size_t cap = FETCH_BUF_SIZE - 1;
     uint32_t idle = millis();
     bool found_end = false;
-    while (hdr_len < cap && hdr_len < 8192) {
+    while (hdr_len < cap && hdr_len < 8192 && !s_cancel) {
         if (s_client->available()) {
             fetch_buf[hdr_len] = s_client->read();
             hdr_len++;
@@ -309,7 +328,7 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
 
     if (!found_end) {
         dbg("No header terminator found");
-        s_client->stop();
+        if (!s_cancel) s_client->stop();
         return 0;
     }
 
@@ -439,10 +458,7 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
         } else if (chunked) {
             dbg("Reading chunked body");
             int cb = read_chunked_body(hdr_len);
-            if (cb < 0) {
-                s_client->stop();
-                return 0;
-            }
+            if (cb < 0) cb = 0;
             body_bytes = (size_t)cb;
         } else {
             // No Content-Length, not chunked — read until close (connection won't be reusable)
@@ -491,6 +507,7 @@ static bool ensure_direct(const char *url) {
 }
 
 static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
+    s_cancel = false;
     dbg("fetch: alloc buf");
     ensure_buf();
     if (!fetch_buf) {
@@ -509,6 +526,7 @@ static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
     const char *cur_body = post_body;
 
     for (int attempt = 0; attempt < 5; attempt++) {
+        if (s_cancel) break;
         dbg("Attempt %d: %.40s", attempt + 1, cur_url);
 
         // Connect: direct for POST, proxy for GET
@@ -526,6 +544,29 @@ static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
             s_client->stop();
             delete s_client;
             s_client = nullptr;
+        }
+
+        if (s_cancel) {
+            // Cancelled — return whatever body we have
+            dbg("CANCEL: status=%d total=%zu", status, total);
+            char *body = strstr(fetch_buf, "\r\n\r\n");
+            dbg("CANCEL: header_end=%s", body ? "found" : "NOT found");
+            if (body) {
+                body += 4;
+                size_t hdr_sz = (size_t)(body - fetch_buf);
+                dbg("CANCEL: hdr_sz=%zu total=%zu body_avail=%zu", hdr_sz, total, total > hdr_sz ? total - hdr_sz : 0);
+                if (total > hdr_sz) {
+                    size_t body_len = total - hdr_sz;
+                    memmove(fetch_buf, body, body_len);
+                    fetch_buf[body_len] = '\0';
+                    dbg("CANCEL: returning %zu bytes partial body", body_len);
+                    return (int)body_len;
+                }
+            }
+            // Clean up connection
+            if (s_client) { s_client->stop(); delete s_client; s_client = nullptr; }
+            dbg("CANCEL: no body data, returning -1");
+            return -1;
         }
 
         if (status == 0 || total == 0) {

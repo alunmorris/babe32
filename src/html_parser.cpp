@@ -1,4 +1,5 @@
 // 060326 Single-pass HTML tokenizer
+// 160326 Add assume_body param for parsing partial/truncated HTML
 #include "html_parser.h"
 #include "url_utils.h"
 #include <Arduino.h>
@@ -212,11 +213,24 @@ static void decode_entities(char *s) {
 
 // IDs commonly used for "skip to main content" targets
 static const char * const s_content_ids[] = {
-    "main", "main-content", "maincontent", "content", "content-wrapper",
-    "content-area", "content-container", "page-content", "primary",
-    "primary-content", "site-content", "main-container", "app-content",
-    "layout-content", "article-content", "post-content", "entry-content",
-    "body-content", "page-body", "container", "wrapper", "main-wrapper",
+    "main", "content", "primary", "container", "wrapper",
+    "main-content", "maincontent", "mainContent",
+    "main-container", "mainContainer",
+    "main-wrapper", "mainWrapper",
+    "content-wrapper", "contentWrapper",
+    "content-area", "contentArea",
+    "content-container", "contentContainer",
+    "page-content", "pageContent",
+    "page-body", "pageBody",
+    "primary-content", "primaryContent",
+    "site-content", "siteContent",
+    "app-content", "appContent",
+    "layout-content", "layoutContent",
+    "article-content", "articleContent",
+    "post-content", "postContent",
+    "entry-content", "entryContent",
+    "body-content", "bodyContent",
+    "mw-content-text",
     nullptr
 };
 
@@ -226,7 +240,8 @@ static bool is_content_id(const char *id) {
     return false;
 }
 
-void html_parse(const char *html, const char *base_url, ParseResult *r) {
+void html_parse(const char *html, const char *base_url, ParseResult *r,
+                bool assume_body) {
     url_set_base(base_url);
 
     static char text_acc[8192];
@@ -234,7 +249,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
 
     ElemType cur_type  = ELEM_PARAGRAPH;
     uint8_t  cur_level = 0;
-    bool     in_body   = false;
+    bool     in_body   = assume_body;
     bool     in_link   = false;
     char     link_href[512] = "";
     char     skip_to_id[128] = "";  // target id from skip-to-content link
@@ -453,6 +468,67 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
             } else if (color_depth > 0) {
                 color_depth--;
                 if (color_depth == 0) cur_color = 0;
+            }
+        }
+        // Image (self-closing)
+        else if (tag_is(name, name_len, "img") && !closing) {
+            flush_acc();
+            char src[512] = "";
+            char alt[256] = "";
+            get_attr(tag_str, "src", src, sizeof(src));
+            get_attr(tag_str, "alt", alt, sizeof(alt));
+            if (src[0] && r->count < MAX_ELEMENTS) {
+                char resolved[512];
+                if (url_resolve(url_get_base(), src, resolved, sizeof(resolved))) {
+                    PageElement *el = &r->elems[r->count];
+                    memset(el, 0, sizeof(*el));
+                    el->type = ELEM_IMAGE;
+                    el->href = pool_add(r, resolved, strlen(resolved));
+                    el->text = alt[0] ? pool_add(r, alt, strlen(alt)) : nullptr;
+                    r->count++;
+                }
+            }
+        }
+
+        // Check any opening tag for background-image in style attribute
+        if (!closing && r->count < MAX_ELEMENTS) {
+            char style[512] = "";
+            if (get_attr(tag_str, "style", style, sizeof(style))) {
+                char *bg = strcasestr(style, "background-image:");
+                if (bg) {
+                    char *url_start = strstr(bg, "url(");
+                    if (url_start) {
+                        url_start += 4;
+                        // Skip optional quote
+                        char quote = 0;
+                        if (*url_start == '\'' || *url_start == '"') {
+                            quote = *url_start++;
+                        }
+                        char *url_end = quote ? strchr(url_start, quote)
+                                              : strchr(url_start, ')');
+                        if (url_end) {
+                            char src[512] = "";
+                            size_t slen = (size_t)(url_end - url_start);
+                            if (slen < sizeof(src)) {
+                                memcpy(src, url_start, slen);
+                                src[slen] = '\0';
+                                // Decode HTML entities in URL (e.g. &#038; -> &)
+                                decode_entities(src);
+                                char resolved[512];
+                                if (url_resolve(url_get_base(), src,
+                                                resolved, sizeof(resolved))) {
+                                    flush_acc();
+                                    PageElement *el = &r->elems[r->count];
+                                    memset(el, 0, sizeof(*el));
+                                    el->type = ELEM_IMAGE;
+                                    el->href = pool_add(r, resolved,
+                                                        strlen(resolved));
+                                    r->count++;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         // Form

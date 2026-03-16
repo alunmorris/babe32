@@ -1,4 +1,5 @@
 // 060326 Build LVGL widgets from parsed PageElement list
+// 160326 Add show_images param for inline image rendering
 #pragma once
 #include <lvgl.h>
 #include "html_parser.h"
@@ -13,7 +14,8 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                  link_tap_cb_t on_link_tap,
                  form_submit_cb_t on_form_submit,
                  form_field_focus_cb_t on_field_focus,
-                 bool show_links = true);
+                 bool show_links = true,
+                 bool show_images = false);
 
 // Collect form data from container into URL-encoded string
 void collect_form_data(lv_obj_t *container, const ParseResult *result,
@@ -24,3 +26,14 @@ void page_clear(lv_obj_t *container);
 
 // Show loading spinner in container
 void page_show_spinner(lv_obj_t *container);
+
+// Image fetch queue — call page_img_next() repeatedly from main loop
+// Returns true if there's an image to fetch (sets *url and *index).
+bool page_img_next(int *index, const char **url);
+// Apply fetched image data to the widget at given index.
+void page_img_set(int index, uint8_t *data, size_t len);
+
+// Full-size image overlay (async) — check from main loop
+bool page_img_full_pending(const char **url);
+void page_img_full_set(uint8_t *data, size_t len);
+void page_img_full_fail();

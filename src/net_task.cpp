@@ -3,6 +3,8 @@
 #include "net_task.h"
 #include "fetcher.h"
 #include "dbglog.h"
+
+extern volatile int g_fetch_kb;
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -34,7 +36,33 @@ static void net_task_fn(void *arg) {
             } else {
                 n = fetch_page(req.url, &html);
             }
-            dbg("fetch returned %d", n);
+            dbg("fetch returned %d, cancelled=%d, kb=%d", n, fetch_cancelled(), g_fetch_kb);
+
+            // If cancelled and fetch returned error but we know data was received,
+            // scan the raw fetch buffer for HTML content
+            if (n <= 0 && fetch_cancelled() && html) {
+                dbg("Cancel: scanning buffer (first 80 chars): %.80s", html);
+                // Buffer may contain: [HTTP headers\r\n\r\n][HTML body]
+                // Or it may already be just HTML if a previous successful path ran
+                char *body = strstr(html, "\r\n\r\n");
+                if (body) {
+                    body += 4;
+                    size_t body_len = strlen(body);
+                    if (body_len > 0) {
+                        memmove(html, body, body_len + 1);
+                        n = (int)body_len;
+                        dbg("Cancel: extracted %d bytes after headers", n);
+                    }
+                }
+                // If no headers found, check if buffer looks like HTML
+                if (n <= 0) {
+                    size_t raw_len = strlen(html);
+                    if (raw_len > 0 && (strstr(html, "<") != nullptr)) {
+                        n = (int)raw_len;
+                        dbg("Cancel: using raw buffer as HTML, %d bytes", n);
+                    }
+                }
+            }
 
             ParseResult *result = parse_result_alloc();
             if (n > 0 && result) {
@@ -77,6 +105,10 @@ void net_task_load(const char *url) {
     NetRequest req = {};
     strncpy(req.url, url, URL_MAX_LEN - 1);
     xQueueSend(s_req_queue, &req, pdMS_TO_TICKS(500));
+}
+
+void net_task_cancel() {
+    fetch_cancel();
 }
 
 void net_task_load_post(const char *url, const char *post_body) {

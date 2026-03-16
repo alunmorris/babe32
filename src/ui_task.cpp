@@ -3,9 +3,12 @@
 // 120326 Fix cross-core rendering via task notification; sync flush + full invalidate
 // 120326 Add on-screen keyboard for URL entry
 // 130326 Reduce keyboard height for landscape layout
+// 160326 Add Stop button for partial page render, AI Chat home button, menu items
 #include "ui_task.h"
 #include "ui_header.h"
 #include "page_renderer.h"
+#include "image_fetch.h"
+#include "fetcher.h"
 #include "gesture.h"
 #include "history.h"
 #include "net_task.h"
@@ -15,6 +18,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <lvgl.h>
+#include <extra/libs/png/lv_png.h>
+#include <extra/libs/sjpg/lv_sjpg.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
@@ -76,12 +81,16 @@ static lv_obj_t         *s_content       = nullptr;
 static lv_obj_t         *s_kb            = nullptr;
 static lv_obj_t         *s_show_btn      = nullptr;
 static lv_obj_t         *s_url_btn       = nullptr;
+static lv_obj_t         *s_img_btn       = nullptr;
+static lv_obj_t         *s_aichat_home   = nullptr;
 static bool              s_kb_visible    = false;
 static bool              s_show_links    = false;
+static bool              s_show_images   = false;
 static ParseResult      *s_cur_result    = nullptr;
 static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
 static bool              s_loading       = false;
+static bool              s_stop_rendered = false; // true after Stop rendered partial page
 static char              s_pending_url[512] = "";
 volatile int             g_fetch_kb = 0;
 
@@ -95,6 +104,7 @@ void lvgl_unlock() {
 static void do_navigate(const char *url);
 static void load_url(const char *url);
 static void retry_current();
+static void stop_btn_cb(lv_event_t *e);
 
 static void kb_show();
 static void kb_hide();
@@ -115,6 +125,8 @@ static void show_boot_menu();
 struct MenuItem { const char *label; const char *url; };
 static const MenuItem s_menu[] = {
     {"Search", HOMEPAGE},
+    {"Wikipedia", "https://en.wikipedia.org/wiki/Main_Page"},
+    {"Hackaday", "https://hackaday.com"},
     {"AI Chat", AICHAT_URL},
 };
 static const int s_menu_count = sizeof(s_menu) / sizeof(s_menu[0]);
@@ -128,6 +140,7 @@ static void show_boot_menu() {
     if (!lvgl_lock(50)) return;
     // Restore header if hidden (e.g. returning from AI chat)
     header_set_visible(true);
+    if (s_aichat_home) lv_obj_add_flag(s_aichat_home, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_pos(s_content, 0, 30);
     lv_obj_set_height(s_content, LV_VER_RES - 30);
     page_clear(s_content);
@@ -161,6 +174,9 @@ static void show_boot_menu() {
 static void on_home() {
     show_boot_menu();
 }
+static void aichat_home_cb(lv_event_t *e) {
+    on_home();
+}
 static void update_nav_buttons() {
     header_set_back_enabled(history_can_back());
     header_set_forward_enabled(history_can_forward());
@@ -178,11 +194,26 @@ static void load_url(const char *url) {
             lv_obj_set_height(s_content, LV_VER_RES);
         }
         page_show_spinner(s_content);
+        // Add Stop button below spinner
+        lv_obj_t *stop = lv_label_create(s_content);
+        lv_label_set_text(stop, "Stop");
+        lv_obj_set_size(stop, 80, 32);
+        lv_obj_set_style_bg_opa(stop, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(stop, lv_color_hex(0x0F3460), 0);
+        lv_obj_set_style_text_color(stop, lv_color_hex(0x4FC3F7), 0);
+        lv_obj_set_style_text_align(stop, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_pad_top(stop, 8, 0);
+        lv_obj_set_style_radius(stop, 0, 0);
+        lv_obj_set_style_shadow_width(stop, 0, 0);
+        lv_obj_set_style_border_width(stop, 0, 0);
+        lv_obj_add_flag(stop, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(stop, stop_btn_cb, LV_EVENT_CLICKED, NULL);
         header_set_loading(true);
         lvgl_unlock();
     }
     g_fetch_kb = 0;
     s_loading = true;
+    s_stop_rendered = false;
     net_task_load(url);
 }
 
@@ -209,6 +240,19 @@ static void on_form_submit(const char *action_url, bool is_post,
         update_nav_buttons();
         if (lvgl_lock(50)) {
             page_show_spinner(s_content);
+            lv_obj_t *stop = lv_label_create(s_content);
+            lv_label_set_text(stop, "Stop");
+            lv_obj_set_size(stop, 80, 32);
+            lv_obj_set_style_bg_opa(stop, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(stop, lv_color_hex(0x0F3460), 0);
+            lv_obj_set_style_text_color(stop, lv_color_hex(0x4FC3F7), 0);
+            lv_obj_set_style_text_align(stop, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_pad_top(stop, 8, 0);
+            lv_obj_set_style_radius(stop, 0, 0);
+            lv_obj_set_style_shadow_width(stop, 0, 0);
+            lv_obj_set_style_border_width(stop, 0, 0);
+            lv_obj_add_flag(stop, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(stop, stop_btn_cb, LV_EVENT_CLICKED, NULL);
             header_set_loading(true);
             lvgl_unlock();
         }
@@ -233,6 +277,7 @@ static void on_field_focus(lv_obj_t *textarea) {
     lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
     if (s_url_btn) lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
+    if (s_img_btn) lv_obj_add_flag(s_img_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(s_content, LV_VER_RES - hdr_height() - KB_HEIGHT);
     lv_keyboard_set_textarea(s_kb, textarea);
     lv_textarea_set_cursor_pos(textarea, LV_TEXTAREA_CURSOR_LAST);
@@ -245,6 +290,49 @@ static void on_field_focus(lv_obj_t *textarea) {
 
 static void retry_btn_cb(lv_event_t *e) {
     retry_current();
+}
+
+// Declared in fetcher.cpp — the raw PSRAM buffer
+extern char *fetch_buf_ptr();
+
+static void stop_btn_cb(lv_event_t *e) {
+    net_task_cancel();  // signal fetch to stop
+
+    int kb = g_fetch_kb;
+    char *buf = fetch_buf_ptr();
+    if (kb > 0 && buf) {
+        size_t data_end = (size_t)(kb + 1) * 1024;
+        if (data_end >= FETCH_BUF_SIZE) data_end = FETCH_BUF_SIZE - 1;
+        buf[data_end] = '\0';
+
+        // Skip HTTP headers if present
+        char *html = buf;
+        char *hdr_end = strstr(buf, "\r\n\r\n");
+        if (hdr_end && strncmp(buf, "HTTP/", 5) == 0) {
+            html = hdr_end + 4;
+        }
+
+        size_t html_len = strlen(html);
+        if (html_len > 0) {
+            ParseResult *result = parse_result_alloc();
+            if (result) {
+                bool no_body = (strcasestr(html, "<body") == nullptr);
+                html_parse(html, s_pending_url, result, no_body);
+                if (result->count > 0) {
+                    if (s_cur_result) parse_result_free(s_cur_result);
+                    s_cur_result = result;
+                    s_loading = false;
+                    s_stop_rendered = true;
+                    header_set_loading(false);
+                    page_render(s_content, result, on_link_tap,
+                               on_form_submit, on_field_focus, s_show_links, s_show_images);
+                    update_nav_buttons();
+                    return;
+                }
+                parse_result_free(result);
+            }
+        }
+    }
 }
 
 static void retry_current() {
@@ -328,7 +416,22 @@ static void url_toggle_cb(lv_event_t *e) {
     if (s_cur_result && s_cur_result->count > 0 && !s_cur_result->error) {
         lv_coord_t sy = lv_obj_get_scroll_y(s_content);
         page_render(s_content, s_cur_result, on_link_tap,
-                    on_form_submit, on_field_focus, s_show_links);
+                    on_form_submit, on_field_focus, s_show_links, s_show_images);
+        lv_obj_update_layout(s_content);
+        lv_obj_scroll_to_y(s_content, sy, LV_ANIM_OFF);
+    }
+}
+
+static void img_toggle_cb(lv_event_t *e) {
+    s_show_images = !s_show_images;
+    if (s_img_btn) {
+        lv_obj_set_style_text_color(s_img_btn,
+            lv_color_hex(s_show_images ? 0x4FC3F7 : 0xE0E0E0), 0);
+    }
+    if (s_cur_result && s_cur_result->count > 0 && !s_cur_result->error) {
+        lv_coord_t sy = lv_obj_get_scroll_y(s_content);
+        page_render(s_content, s_cur_result, on_link_tap,
+                    on_form_submit, on_field_focus, s_show_links, s_show_images);
         lv_obj_update_layout(s_content);
         lv_obj_scroll_to_y(s_content, sy, LV_ANIM_OFF);
     }
@@ -339,6 +442,7 @@ static void kb_show() {
     lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
     if (s_url_btn) lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
+    if (s_img_btn) lv_obj_add_flag(s_img_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(s_content, LV_VER_RES - 30 - KB_HEIGHT);
     lv_obj_t *ta = header_get_url_ta();
     lv_keyboard_set_textarea(s_kb, ta);
@@ -352,6 +456,7 @@ static void kb_hide() {
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
     if (s_url_btn) lv_obj_clear_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
+    if (s_img_btn) lv_obj_clear_flag(s_img_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(s_content, LV_VER_RES - hdr_height());
     lv_obj_clear_state(header_get_url_ta(), LV_STATE_FOCUSED);
     lv_keyboard_set_textarea(s_kb, NULL);
@@ -420,7 +525,7 @@ void ui_build_root() {
     s_url_btn = lv_label_create(scr);
     lv_label_set_text(s_url_btn, "URLs");
     lv_obj_set_size(s_url_btn, 36, 24);
-    lv_obj_align(s_url_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -52);
+    lv_obj_align(s_url_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -38);
     lv_obj_set_style_bg_opa(s_url_btn, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_url_btn, lv_color_hex(0x0F3460), 0);
     lv_obj_set_style_text_color(s_url_btn, lv_color_hex(0xE0E0E0), 0);
@@ -432,6 +537,23 @@ void ui_build_root() {
     lv_obj_set_style_border_width(s_url_btn, 0, 0);
     lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_url_btn, url_toggle_cb, LV_EVENT_CLICKED, NULL);
+
+    // "IMGs" toggle button — 10px above URLs button
+    s_img_btn = lv_label_create(scr);
+    lv_label_set_text(s_img_btn, "IMGs");
+    lv_obj_set_size(s_img_btn, 36, 24);
+    lv_obj_align(s_img_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -72);
+    lv_obj_set_style_bg_opa(s_img_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_img_btn, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_text_color(s_img_btn, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(s_img_btn, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(s_img_btn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(s_img_btn, 4, 0);
+    lv_obj_set_style_radius(s_img_btn, 2, 0);
+    lv_obj_set_style_shadow_width(s_img_btn, 0, 0);
+    lv_obj_set_style_border_width(s_img_btn, 0, 0);
+    lv_obj_add_flag(s_img_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_img_btn, img_toggle_cb, LV_EVENT_CLICKED, NULL);
 
     // Keyboard button — bottom-right, next to URL button
     s_show_btn = lv_label_create(scr);
@@ -462,6 +584,8 @@ static void ui_task_fn(void *arg) {
     display_init();
     display_clear();
     lv_init();
+    lv_png_init();
+    lv_split_jpeg_init();
     display_lvgl_init();
     touch_init();
     touch_lvgl_init();
@@ -490,6 +614,14 @@ static void ui_task_fn(void *arg) {
         if (lvgl_lock(5)) {
             // Check if net_task delivered a new page
             if (ulTaskNotifyTake(pdTRUE, 0)) {
+                // If Stop already rendered partial content, discard this result
+                if (s_stop_rendered) {
+                    s_stop_rendered = false;
+                    if (s_pending_result) {
+                        parse_result_free(s_pending_result);
+                        s_pending_result = nullptr;
+                    }
+                } else {
                 if (s_cur_result) parse_result_free(s_cur_result);
                 s_cur_result = s_pending_result;
                 s_pending_result = nullptr;
@@ -498,7 +630,7 @@ static void ui_task_fn(void *arg) {
                 ParseResult *result = s_cur_result;
                 if (result && result->count > 0 && !result->error) {
                     page_render(s_content, result, on_link_tap,
-                               on_form_submit, on_field_focus, s_show_links);
+                               on_form_submit, on_field_focus, s_show_links, s_show_images);
                 } else {
                     page_clear(s_content);
                     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
@@ -530,11 +662,30 @@ static void ui_task_fn(void *arg) {
                 header_set_visible(!is_aichat);
                 lv_obj_set_pos(s_content, 0, is_aichat ? 0 : 30);
                 lv_obj_set_height(s_content, is_aichat ? LV_VER_RES : LV_VER_RES - 30);
+                // Floating Home button for AI Chat (no header)
+                if (is_aichat) {
+                    if (!s_aichat_home) {
+                        s_aichat_home = lv_label_create(lv_scr_act());
+                        lv_label_set_text(s_aichat_home, LV_SYMBOL_HOME);
+                        lv_obj_set_size(s_aichat_home, 30, 26);
+                        lv_obj_set_style_text_color(s_aichat_home, lv_color_hex(0xE0E0E0), 0);
+                        lv_obj_set_style_text_font(s_aichat_home, &lv_font_montserrat_16, 0);
+                        lv_obj_set_style_text_align(s_aichat_home, LV_TEXT_ALIGN_CENTER, 0);
+                        lv_obj_set_style_pad_top(s_aichat_home, 4, 0);
+                        lv_obj_add_flag(s_aichat_home, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_FLOATING);
+                        lv_obj_add_event_cb(s_aichat_home, aichat_home_cb, LV_EVENT_CLICKED, NULL);
+                    }
+                    lv_obj_align(s_aichat_home, LV_ALIGN_TOP_RIGHT, -4, 2);
+                    lv_obj_clear_flag(s_aichat_home, LV_OBJ_FLAG_HIDDEN);
+                } else if (s_aichat_home) {
+                    lv_obj_add_flag(s_aichat_home, LV_OBJ_FLAG_HIDDEN);
+                }
                 if (is_aichat)
                     lv_obj_scroll_to(s_content, 0, LV_COORD_MAX, LV_ANIM_OFF);
                 else
                     lv_obj_scroll_to(s_content, 0, 0, LV_ANIM_OFF);
                 update_nav_buttons();
+            } // else (not s_stop_rendered)
             }
             // Update loading KB counter once per second
             if (s_loading) {
@@ -565,6 +716,41 @@ static void ui_task_fn(void *arg) {
             lv_timer_handler();
             lvgl_unlock();
         }
+
+        // Full-size image fetch (outside LVGL lock, highest priority)
+        {
+            const char *full_url;
+            if (page_img_full_pending(&full_url)) {
+                size_t len = 0;
+                uint8_t *data = image_fetch_full(full_url, &len);
+                if (lvgl_lock(50)) {
+                    if (data && len > 0)
+                        page_img_full_set(data, len);
+                    else
+                        page_img_full_fail();
+                    lvgl_unlock();
+                } else if (data) {
+                    heap_caps_free(data);
+                }
+            }
+        }
+
+        // Fetch one pending thumbnail per loop (outside LVGL lock)
+        if (!s_loading && s_show_images) {
+            int img_idx;
+            const char *img_url;
+            if (page_img_next(&img_idx, &img_url)) {
+                size_t len = 0;
+                uint8_t *data = image_fetch(img_url, &len);
+                if (data && len > 0 && lvgl_lock(50)) {
+                    page_img_set(img_idx, data, len);
+                    lvgl_unlock();
+                } else if (data) {
+                    heap_caps_free(data);
+                }
+            }
+        }
+
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

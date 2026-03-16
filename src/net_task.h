@@ -13,3 +13,6 @@ void net_task_load(const char *url);
 
 // Request a POST page load (non-blocking)
 void net_task_load_post(const char *url, const char *post_body);
+
+// Cancel in-progress fetch
+void net_task_cancel();

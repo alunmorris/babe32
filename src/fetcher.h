@@ -16,3 +16,12 @@ int fetch_page_post(const char *url, const char *post_body, char **buf_out);
 // Close persistent TLS connection and clear cached DNS.
 // Call on WiFi disconnect or before deep sleep.
 void fetch_disconnect();
+
+// Cancel in-progress fetch. Stops reading and disconnects.
+void fetch_cancel();
+
+// Check if fetch was cancelled.
+bool fetch_cancelled();
+
+// Get pointer to the raw fetch buffer (may contain partial data during fetch).
+char *fetch_buf_ptr();
