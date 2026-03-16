@@ -132,7 +132,8 @@ void page_show_spinner(lv_obj_t *container) {
 void page_render(lv_obj_t *container, const ParseResult *result,
                  link_tap_cb_t on_link_tap,
                  form_submit_cb_t on_form_submit,
-                 form_field_focus_cb_t on_field_focus) {
+                 form_field_focus_cb_t on_field_focus,
+                 bool show_links) {
     page_clear(container);
     s_link_cb       = on_link_tap;
     s_submit_cb     = on_form_submit;
@@ -146,9 +147,67 @@ void page_render(lv_obj_t *container, const ParseResult *result,
     lv_obj_set_style_pad_all(container, 8, 0);
     lv_obj_set_style_pad_gap(container, 4, 0);
 
+    // Helper: append text to the last child label (for merging around hidden links)
+    auto append_to_prev = [&](const char *txt, bool add_space) -> bool {
+        uint32_t cc = lv_obj_get_child_cnt(container);
+        if (cc == 0) return false;
+        lv_obj_t *prev = lv_obj_get_child(container, cc - 1);
+        if (!lv_obj_check_type(prev, &lv_label_class)) return false;
+        const char *old_txt = lv_label_get_text(prev);
+        if (!old_txt) return false;
+        size_t olen = strlen(old_txt);
+        size_t nlen = strlen(txt);
+        // Check if we need to insert a space
+        bool need_sp = add_space && olen > 0 && old_txt[olen - 1] != ' ' && txt[0] != ' ';
+        size_t total = olen + (need_sp ? 1 : 0) + nlen;
+        char *merged = (char *)lv_mem_alloc(total + 1);
+        if (!merged) return false;
+        memcpy(merged, old_txt, olen);
+        if (need_sp) merged[olen++] = ' ';
+        memcpy(merged + olen, txt, nlen);
+        merged[olen + nlen] = '\0';
+        lv_label_set_text(prev, merged);
+        lv_mem_free(merged);
+        return true;
+    };
+
+    bool merge_next = false;  // true after a hidden link — next text appends too
     for (int i = 0; i < result->count; i++) {
         const PageElement *e = &result->elems[i];
-        if (e->type == ELEM_HIDDEN) continue;  // not rendered
+        if (e->type == ELEM_HIDDEN) continue;
+
+        // Links with show_links off: merge text inline with > suffix
+        if (e->type == ELEM_LINK && !show_links) {
+            if (!e->text) continue;
+            // Build "[text]" string
+            size_t tlen = strlen(e->text);
+            char *marked = (char *)lv_mem_alloc(tlen + 3);
+            if (marked) {
+                marked[0] = '[';
+                memcpy(marked + 1, e->text, tlen);
+                marked[tlen + 1] = ']';
+                marked[tlen + 2] = '\0';
+                if (!append_to_prev(marked, true)) {
+                    lv_obj_t *lbl = lv_label_create(container);
+                    lv_label_set_text(lbl, marked);
+                    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+                    lv_obj_set_width(lbl, LV_PCT(100));
+                    lv_obj_set_style_text_color(lbl, COLOUR_TEXT, 0);
+                    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+                }
+                lv_mem_free(marked);
+            }
+            merge_next = true;
+            continue;
+        }
+
+        // After a hidden link, merge the next paragraph into the same label
+        if (merge_next && e->type == ELEM_PARAGRAPH && e->text) {
+            merge_next = false;
+            if (append_to_prev(e->text, true)) continue;
+        }
+        merge_next = false;
+
         if (!e->text && e->type != ELEM_LINEBREAK &&
             e->type != ELEM_INPUT && e->type != ELEM_SELECT) continue;
 

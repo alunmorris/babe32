@@ -12,7 +12,8 @@ typedef void (*form_field_focus_cb_t)(lv_obj_t *textarea);
 void page_render(lv_obj_t *container, const ParseResult *result,
                  link_tap_cb_t on_link_tap,
                  form_submit_cb_t on_form_submit,
-                 form_field_focus_cb_t on_field_focus);
+                 form_field_focus_cb_t on_field_focus,
+                 bool show_links = true);
 
 // Collect form data from container into URL-encoded string
 void collect_form_data(lv_obj_t *container, const ParseResult *result,

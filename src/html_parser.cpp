@@ -159,8 +159,20 @@ static void decode_entities(char *s) {
             else if (strncmp(r, "&nbsp;", 6) == 0) { *w++ = ' ';  r += 6; }
             else if (strncmp(r, "&quot;", 6) == 0) { *w++ = '"';  r += 6; }
             else if (strncmp(r, "&#39;",  5) == 0) { *w++ = '\''; r += 5; }
+            // Typographic quotes and punctuation
+            else if (strncmp(r, "&ldquo;",  7) == 0) { *w++ = '"';  r += 7; }
+            else if (strncmp(r, "&rdquo;",  7) == 0) { *w++ = '"';  r += 7; }
+            else if (strncmp(r, "&lsquo;",  7) == 0) { *w++ = '\''; r += 7; }
+            else if (strncmp(r, "&rsquo;",  7) == 0) { *w++ = '\''; r += 7; }
+            else if (strncmp(r, "&mdash;",  7) == 0) { *w++ = '-';  r += 7; }
+            else if (strncmp(r, "&ndash;",  7) == 0) { *w++ = '-';  r += 7; }
+            else if (strncmp(r, "&hellip;", 8) == 0) { *w++ = '.'; *w++ = '.'; *w++ = '.'; r += 8; }
+            else if (strncmp(r, "&laquo;",  7) == 0) { *w++ = '"';  r += 7; }
+            else if (strncmp(r, "&raquo;",  7) == 0) { *w++ = '"';  r += 7; }
+            else if (strncmp(r, "&apos;",   6) == 0) { *w++ = '\''; r += 6; }
+            else if (strncmp(r, "&copy;",   6) == 0) { *w++ = '('; *w++ = 'c'; *w++ = ')'; r += 6; }
             else if (strncmp(r, "&#", 2) == 0) {
-                // Numeric entity &#NN; or &#xNN; — skip non-ASCII, keep ASCII
+                // Numeric entity &#NN; or &#xNN;
                 char *semi = strchr(r, ';');
                 if (semi && semi - r < 12) {
                     long cp = 0;
@@ -168,8 +180,23 @@ static void decode_entities(char *s) {
                         cp = strtol(r + 3, nullptr, 16);
                     else
                         cp = strtol(r + 2, nullptr, 10);
-                    if (cp >= 0x20 && cp <= 0x7E)
+                    if (cp >= 0x20 && cp <= 0x7E) {
                         *w++ = (char)cp;
+                    } else {
+                        // Map common Unicode codepoints to ASCII
+                        switch (cp) {
+                            case 8216: case 8217: *w++ = '\''; break; // smart quotes
+                            case 8218:            *w++ = ',';  break;
+                            case 8220: case 8221: *w++ = '"';  break;
+                            case 8211: case 8212: *w++ = '-';  break; // en/em dash
+                            case 8230: *w++ = '.'; *w++ = '.'; *w++ = '.'; break;
+                            case 8226: *w++ = '*';  break; // bullet
+                            case 169:  *w++ = '('; *w++ = 'c'; *w++ = ')'; break;
+                            case 174:  *w++ = '('; *w++ = 'R'; *w++ = ')'; break;
+                            case 8482: *w++ = 'T'; *w++ = 'M'; break;
+                            default: break; // drop unknown non-ASCII
+                        }
+                    }
                     r = semi + 1;
                 } else {
                     *w++ = *r++;
@@ -183,6 +210,22 @@ static void decode_entities(char *s) {
     *w = '\0';
 }
 
+// IDs commonly used for "skip to main content" targets
+static const char * const s_content_ids[] = {
+    "main", "main-content", "maincontent", "content", "content-wrapper",
+    "content-area", "content-container", "page-content", "primary",
+    "primary-content", "site-content", "main-container", "app-content",
+    "layout-content", "article-content", "post-content", "entry-content",
+    "body-content", "page-body", "container", "wrapper", "main-wrapper",
+    nullptr
+};
+
+static bool is_content_id(const char *id) {
+    for (int i = 0; s_content_ids[i]; i++)
+        if (strcasecmp(id, s_content_ids[i]) == 0) return true;
+    return false;
+}
+
 void html_parse(const char *html, const char *base_url, ParseResult *r) {
     url_set_base(base_url);
 
@@ -194,6 +237,8 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
     bool     in_body   = false;
     bool     in_link   = false;
     char     link_href[512] = "";
+    char     skip_to_id[128] = "";  // target id from skip-to-content link
+    bool     found_content = false; // true once we've hit the target id
     // Form state
     bool     in_select   = false;
     int      select_elem = -1;       // index of current ELEM_SELECT in elems[]
@@ -236,10 +281,37 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
             if (in_body && acc_len < sizeof(text_acc) - 1) {
                 uint8_t c = (uint8_t)*p;
                 if (c >= 0x80) {
-                    // Skip UTF-8 multi-byte sequence (Montserrat has no glyphs)
-                    if      (c >= 0xF0) p += 4;  // 4-byte
-                    else if (c >= 0xE0) p += 3;  // 3-byte
-                    else                p += 2;   // 2-byte
+                    // Decode UTF-8 and map common chars to ASCII
+                    uint32_t cp = 0;
+                    int bytes = 0;
+                    if      (c >= 0xF0) { cp = c & 0x07; bytes = 4; }
+                    else if (c >= 0xE0) { cp = c & 0x0F; bytes = 3; }
+                    else                { cp = c & 0x1F; bytes = 2; }
+                    for (int b = 1; b < bytes && ((uint8_t)p[b] & 0xC0) == 0x80; b++)
+                        cp = (cp << 6) | (p[b] & 0x3F);
+                    p += bytes;
+                    // Map to ASCII equivalent
+                    char mapped = 0;
+                    switch (cp) {
+                        case 0x2018: case 0x2019: case 0x201A: mapped = '\''; break;
+                        case 0x201C: case 0x201D: case 0x201E: mapped = '"';  break;
+                        case 0x2013: case 0x2014: mapped = '-';  break;
+                        case 0x2022: mapped = '*';  break;
+                        case 0x00A0: mapped = ' ';  break; // non-breaking space
+                        case 0x00A9: mapped = 'c';  break; // copyright (simplified)
+                        case 0x00AE: mapped = 'R';  break; // registered
+                        default: break;
+                    }
+                    if (mapped && acc_len < sizeof(text_acc) - 1) {
+                        if (mapped == ' ') {
+                            if (acc_len > 0 && text_acc[acc_len-1] != ' ')
+                                text_acc[acc_len++] = ' ';
+                        } else {
+                            text_acc[acc_len++] = mapped;
+                            if (!in_bold) acc_all_bold = false;
+                            if (cur_color) acc_color = cur_color;
+                        }
+                    }
                     continue;
                 }
                 if (isspace(c)) {
@@ -272,11 +344,28 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
         memcpy(tag_str, tag_start, copy_len);
         tag_str[copy_len] = '\0';
 
-        // Skip script/style blocks entirely
+        // Check for skip-to-content target id on any opening tag
+        if (!closing && skip_to_id[0] && !found_content && in_body) {
+            char id_val[128] = "";
+            if (get_attr(tag_str, "id", id_val, sizeof(id_val))) {
+                if (strcasecmp(id_val, skip_to_id) == 0) {
+                    // Discard everything accumulated so far
+                    r->count = 0;
+                    r->pool_used = 0;
+                    acc_len = 0;
+                    found_content = true;
+                }
+            }
+        }
+
+        // Skip script/style/title blocks entirely
         if (!closing && (tag_is(name, name_len, "script") ||
-                         tag_is(name, name_len, "style"))) {
+                         tag_is(name, name_len, "style") ||
+                         tag_is(name, name_len, "title"))) {
             const char *close_tag = tag_is(name, name_len, "script")
-                                    ? "</script>" : "</style>";
+                                    ? "</script>"
+                                    : tag_is(name, name_len, "style")
+                                    ? "</style>" : "</title>";
             const char *close = strcasestr(tag_end + 1, close_tag);
             p = close ? close + strlen(close_tag) : tag_end + 1;
             continue;
@@ -323,6 +412,12 @@ void html_parse(const char *html, const char *base_url, ParseResult *r) {
             if (!closing) {
                 char href_raw[512] = "";
                 if (get_attr(tag_str, "href", href_raw, sizeof(href_raw))) {
+                    // Check for skip-to-content anchor link
+                    if (href_raw[0] == '#' && !skip_to_id[0] && !found_content) {
+                        if (is_content_id(href_raw + 1)) {
+                            strncpy(skip_to_id, href_raw + 1, sizeof(skip_to_id) - 1);
+                        }
+                    }
                     char resolved[512];
                     if (url_resolve(url_get_base(), href_raw,
                                     resolved, sizeof(resolved))) {

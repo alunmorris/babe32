@@ -75,7 +75,9 @@ static SemaphoreHandle_t s_lvgl_mutex    = nullptr;
 static lv_obj_t         *s_content       = nullptr;
 static lv_obj_t         *s_kb            = nullptr;
 static lv_obj_t         *s_show_btn      = nullptr;
+static lv_obj_t         *s_url_btn       = nullptr;
 static bool              s_kb_visible    = false;
+static bool              s_show_links    = false;
 static ParseResult      *s_cur_result    = nullptr;
 static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
@@ -230,6 +232,7 @@ static void on_field_focus(lv_obj_t *textarea) {
     if (!s_kb || !s_content || !s_show_btn) return;
     lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
+    if (s_url_btn) lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(s_content, LV_VER_RES - hdr_height() - KB_HEIGHT);
     lv_keyboard_set_textarea(s_kb, textarea);
     lv_textarea_set_cursor_pos(textarea, LV_TEXTAREA_CURSOR_LAST);
@@ -314,10 +317,28 @@ static void show_btn_cb(lv_event_t *e) {
     kb_show();
 }
 
+static void url_toggle_cb(lv_event_t *e) {
+    s_show_links = !s_show_links;
+    // Update button appearance
+    if (s_url_btn) {
+        lv_obj_set_style_text_color(s_url_btn,
+            lv_color_hex(s_show_links ? 0x4FC3F7 : 0xE0E0E0), 0);
+    }
+    // Re-render current page with new link visibility, preserving scroll
+    if (s_cur_result && s_cur_result->count > 0 && !s_cur_result->error) {
+        lv_coord_t sy = lv_obj_get_scroll_y(s_content);
+        page_render(s_content, s_cur_result, on_link_tap,
+                    on_form_submit, on_field_focus, s_show_links);
+        lv_obj_update_layout(s_content);
+        lv_obj_scroll_to_y(s_content, sy, LV_ANIM_OFF);
+    }
+}
+
 static void kb_show() {
     if (!s_kb || !s_content || !s_show_btn) return;
     lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
+    if (s_url_btn) lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(s_content, LV_VER_RES - 30 - KB_HEIGHT);
     lv_obj_t *ta = header_get_url_ta();
     lv_keyboard_set_textarea(s_kb, ta);
@@ -330,6 +351,7 @@ static void kb_hide() {
     if (!s_kb || !s_content || !s_show_btn) return;
     lv_obj_add_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
+    if (s_url_btn) lv_obj_clear_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_height(s_content, LV_VER_RES - hdr_height());
     lv_obj_clear_state(header_get_url_ta(), LV_STATE_FOCUSED);
     lv_keyboard_set_textarea(s_kb, NULL);
@@ -394,17 +416,34 @@ void ui_build_root() {
     lv_obj_add_event_cb(s_kb, kb_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_kb, kb_event_cb, LV_EVENT_CANCEL, NULL);
 
-    // "Show" button — bottom-right, visible when keyboard hidden
+    // "URLs" toggle button — bottom-right, two rows above keyboard button
+    s_url_btn = lv_label_create(scr);
+    lv_label_set_text(s_url_btn, "URLs");
+    lv_obj_set_size(s_url_btn, 36, 24);
+    lv_obj_align(s_url_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -52);
+    lv_obj_set_style_bg_opa(s_url_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_url_btn, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_text_color(s_url_btn, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(s_url_btn, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(s_url_btn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(s_url_btn, 4, 0);
+    lv_obj_set_style_radius(s_url_btn, 2, 0);
+    lv_obj_set_style_shadow_width(s_url_btn, 0, 0);
+    lv_obj_set_style_border_width(s_url_btn, 0, 0);
+    lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_url_btn, url_toggle_cb, LV_EVENT_CLICKED, NULL);
+
+    // Keyboard button — bottom-right, next to URL button
     s_show_btn = lv_label_create(scr);
-    lv_label_set_text(s_show_btn, "Kb");
+    lv_label_set_text(s_show_btn, LV_SYMBOL_KEYBOARD);
     lv_obj_set_size(s_show_btn, 36, 24);
     lv_obj_align(s_show_btn, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
     lv_obj_set_style_bg_opa(s_show_btn, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(s_show_btn, lv_color_hex(0x0F3460), 0);
     lv_obj_set_style_text_color(s_show_btn, lv_color_hex(0xE0E0E0), 0);
-    lv_obj_set_style_text_font(s_show_btn, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_show_btn, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_align(s_show_btn, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_pad_top(s_show_btn, 4, 0);
+    lv_obj_set_style_pad_top(s_show_btn, 3, 0);
     lv_obj_set_style_radius(s_show_btn, 2, 0);
     lv_obj_set_style_shadow_width(s_show_btn, 0, 0);
     lv_obj_set_style_border_width(s_show_btn, 0, 0);
@@ -459,7 +498,7 @@ static void ui_task_fn(void *arg) {
                 ParseResult *result = s_cur_result;
                 if (result && result->count > 0 && !result->error) {
                     page_render(s_content, result, on_link_tap,
-                               on_form_submit, on_field_focus);
+                               on_form_submit, on_field_focus, s_show_links);
                 } else {
                     page_clear(s_content);
                     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);

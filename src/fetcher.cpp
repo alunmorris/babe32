@@ -28,6 +28,40 @@ static WiFiClientSecure *s_client = nullptr;
 static IPAddress s_proxy_ip;
 static bool s_dns_cached = false;
 
+// Cookie jar: store cookies for multiple hosts
+#define COOKIE_MAX_HOSTS 4
+struct CookieEntry {
+    char host[128];
+    char data[256];  // "name=value; name2=value2"
+};
+static CookieEntry s_cookies[COOKIE_MAX_HOSTS] = {};
+
+static CookieEntry *cookie_find(const char *host) {
+    for (int i = 0; i < COOKIE_MAX_HOSTS; i++)
+        if (s_cookies[i].host[0] && strcmp(s_cookies[i].host, host) == 0)
+            return &s_cookies[i];
+    return nullptr;
+}
+
+static CookieEntry *cookie_alloc(const char *host) {
+    // Find existing
+    CookieEntry *e = cookie_find(host);
+    if (e) return e;
+    // Find empty slot
+    for (int i = 0; i < COOKIE_MAX_HOSTS; i++)
+        if (!s_cookies[i].host[0]) {
+            strncpy(s_cookies[i].host, host, sizeof(s_cookies[i].host) - 1);
+            s_cookies[i].data[0] = '\0';
+            return &s_cookies[i];
+        }
+    // Evict oldest (slot 0), shift down
+    memmove(&s_cookies[0], &s_cookies[1], sizeof(CookieEntry) * (COOKIE_MAX_HOSTS - 1));
+    CookieEntry *last = &s_cookies[COOKIE_MAX_HOSTS - 1];
+    strncpy(last->host, host, sizeof(last->host) - 1);
+    last->data[0] = '\0';
+    return last;
+}
+
 static bool ensure_connected() {
     if (!s_client) {
         s_client = new WiFiClientSecure();
@@ -196,6 +230,13 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
     const char *path;
     parse_url(url, host, sizeof(host), &path);
 
+    // Build Cookie header if we have cookies for this host
+    char cookie_hdr[600] = "";
+    CookieEntry *ce = cookie_find(host);
+    if (ce && ce->data[0]) {
+        snprintf(cookie_hdr, sizeof(cookie_hdr), "Cookie: %s\r\n", ce->data);
+    }
+
     // Batch entire HTTP request into single write
     char req[2048];
     int req_len;
@@ -208,11 +249,12 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
             "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
             "Accept-Language: en-US,en;q=0.5\r\n"
             "Accept-Encoding: identity\r\n"
+            "%s"
             "Content-Type: application/x-www-form-urlencoded\r\n"
             "Content-Length: %zu\r\n"
             "Connection: close\r\n\r\n"
             "%s",
-            path, host, strlen(post_body), post_body);
+            path, host, cookie_hdr, strlen(post_body), post_body);
     } else {
         // Proxy connection: use full URL, include proxy auth
         req_len = snprintf(req, sizeof(req),
@@ -223,8 +265,9 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
             "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
             "Accept-Language: en-US,en;q=0.5\r\n"
             "Accept-Encoding: identity\r\n"
+            "%s"
             "Connection: keep-alive\r\n\r\n",
-            url, host, PROXY_AUTH);
+            url, host, PROXY_AUTH, cookie_hdr);
     }
 
     if (req_len >= (int)sizeof(req)) {
@@ -274,6 +317,36 @@ static int do_request(const char *url, const char *post_body, size_t *total_out)
     int status = 0;
     if (hdr_len > 12) sscanf(fetch_buf, "HTTP/%*d.%*d %d", &status);
     dbg("HTTP %d (headers %zu bytes, %lums)", status, hdr_len, millis() - t0);
+
+    // Parse Set-Cookie headers and store cookies for this host
+    {
+        char req_host[128] = {};
+        const char *dummy;
+        parse_url(url, req_host, sizeof(req_host), &dummy);
+        char *pos = fetch_buf;
+        while ((pos = strcasestr(pos, "\r\nSet-Cookie:")) != nullptr) {
+            pos += 13;
+            while (*pos == ' ') pos++;
+            char *end = pos;
+            while (*end && *end != ';' && *end != '\r' && *end != '\n') end++;
+            size_t nv_len = (size_t)(end - pos);
+            if (nv_len > 0 && nv_len < 200) {
+                char nv[200];
+                memcpy(nv, pos, nv_len);
+                nv[nv_len] = '\0';
+                CookieEntry *ce = cookie_alloc(req_host);
+                // Append or replace cookie in this entry
+                size_t cur_len = strlen(ce->data);
+                if (cur_len > 0 && cur_len + 2 + nv_len < sizeof(ce->data)) {
+                    strcat(ce->data, "; ");
+                    strncat(ce->data, nv, sizeof(ce->data) - strlen(ce->data) - 1);
+                } else if (cur_len == 0 && nv_len < sizeof(ce->data)) {
+                    strncpy(ce->data, nv, sizeof(ce->data) - 1);
+                }
+                dbg("Cookie [%s]: %s", req_host, nv);
+            }
+        }
+    }
 
     // Parse Content-Length and Transfer-Encoding from headers
     long content_length = -1;
