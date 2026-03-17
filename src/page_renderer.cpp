@@ -18,11 +18,13 @@ static bool s_inverted = false;
 #define COLOUR_BORDER  lv_color_hex(s_inverted ? 0xCCCCCC : 0x0F3460)
 #define COLOUR_BTN_BG  lv_color_hex(s_inverted ? 0xE0E0E0 : 0x0F3460)
 #define COLOUR_BTN_TXT lv_color_hex(s_inverted ? 0x0066CC : 0x4FC3F7)
+#define COLOUR_ITALIC  lv_color_hex(s_inverted ? 0x555555 : 0xA0A0A0)
 
 void page_set_inverted(bool inv) { s_inverted = inv; }
 bool page_is_inverted() { return s_inverted; }
 
 LV_FONT_DECLARE(lv_font_montserrat_bold_14);
+LV_FONT_DECLARE(lv_font_dejavu_mono_14);
 
 static link_tap_cb_t        s_link_cb       = nullptr;
 static form_submit_cb_t     s_submit_cb     = nullptr;
@@ -305,6 +307,7 @@ void page_render(lv_obj_t *container, const ParseResult *result,
         merge_next = false;
 
         if (!e->text && e->type != ELEM_LINEBREAK &&
+            e->type != ELEM_HR &&
             e->type != ELEM_INPUT && e->type != ELEM_SELECT &&
             e->type != ELEM_IMAGE) continue;
 
@@ -327,10 +330,13 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_label_set_text(lbl, e->text);
                 lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
                 lv_obj_set_width(lbl, LV_PCT(100));
-                lv_obj_set_style_text_color(lbl, e->color
-                    ? lv_color_hex(e->color & 0x00FFFFFF) : COLOUR_TEXT, 0);
-                lv_obj_set_style_text_font(lbl, e->bold ? &lv_font_montserrat_bold_14
-                                                        : &lv_font_montserrat_14, 0);
+                lv_color_t tc = e->color ? lv_color_hex(e->color & 0x00FFFFFF)
+                              : e->italic ? COLOUR_ITALIC : COLOUR_TEXT;
+                lv_obj_set_style_text_color(lbl, tc, 0);
+                const lv_font_t *f = e->monospace ? &lv_font_dejavu_mono_14
+                                   : e->bold     ? &lv_font_montserrat_bold_14
+                                                  : &lv_font_montserrat_14;
+                lv_obj_set_style_text_font(lbl, f, 0);
                 break;
             }
             case ELEM_LINK: {
@@ -338,10 +344,13 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_label_set_text(lbl, e->text);
                 lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
                 lv_obj_set_width(lbl, LV_PCT(100));
-                lv_obj_set_style_text_color(lbl, e->color
-                    ? lv_color_hex(e->color & 0x00FFFFFF) : COLOUR_LINK, 0);
-                lv_obj_set_style_text_font(lbl, e->bold ? &lv_font_montserrat_bold_14
-                                                        : &lv_font_montserrat_14, 0);
+                lv_color_t tc = e->color ? lv_color_hex(e->color & 0x00FFFFFF)
+                              : COLOUR_LINK;
+                lv_obj_set_style_text_color(lbl, tc, 0);
+                const lv_font_t *f = e->monospace ? &lv_font_dejavu_mono_14
+                                   : e->bold     ? &lv_font_montserrat_bold_14
+                                                  : &lv_font_montserrat_14;
+                lv_obj_set_style_text_font(lbl, f, 0);
                 lv_obj_add_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_add_event_cb(lbl, link_event_cb, LV_EVENT_CLICKED,
                                     (void *)e->href);
@@ -351,6 +360,18 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_obj_t *sp = lv_label_create(container);
                 lv_obj_set_size(sp, LV_PCT(100), 4);
                 lv_label_set_text(sp, "");
+                break;
+            }
+            case ELEM_HR: {
+                lv_obj_t *line = lv_obj_create(container);
+                lv_obj_set_size(line, LV_PCT(100), 1);
+                lv_obj_set_style_bg_color(line, COLOUR_BORDER, 0);
+                lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+                lv_obj_set_style_border_width(line, 0, 0);
+                lv_obj_set_style_radius(line, 0, 0);
+                lv_obj_set_style_pad_all(line, 0, 0);
+                lv_obj_set_style_shadow_width(line, 0, 0);
+                lv_obj_set_style_outline_width(line, 0, 0);
                 break;
             }
             case ELEM_INPUT: {

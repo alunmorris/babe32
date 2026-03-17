@@ -13,7 +13,8 @@ typedef enum {
     ELEM_HIDDEN,     // hidden input (not rendered)
     ELEM_SUBMIT,     // submit button
     ELEM_SELECT,     // dropdown select
-    ELEM_IMAGE       // inline image (src in href, alt in text)
+    ELEM_IMAGE,      // inline image (src in href, alt in text)
+    ELEM_HR          // horizontal rule
 } ElemType;
 
 typedef struct {
@@ -26,6 +27,8 @@ typedef struct {
     uint8_t  form_id;  // form scope index (for HIDDEN/SUBMIT/INPUT/SELECT)
     bool     multiline; // true for <textarea>
     bool     bold;      // true if inside <b>/<strong>
+    bool     italic;    // true if inside <em>/<i>/<dfn>
+    bool     monospace; // true if inside <code>/<kbd>/<samp>
     uint32_t color;     // 0 = default, else 0xRRGGBB | 0x01000000 flag
 } PageElement;
 

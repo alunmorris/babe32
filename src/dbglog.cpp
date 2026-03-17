@@ -1,5 +1,6 @@
 // 120326 On-screen debug log
 #include "dbglog.h"
+#include <Arduino.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -29,6 +30,8 @@ void dbg(const char *fmt, ...) {
     if (line[n - 1] != '\n') {
         if (n < (int)sizeof(line) - 1) { line[n++] = '\n'; line[n] = '\0'; }
     }
+
+    Serial.print(line);
 
     if (s_mutex) xSemaphoreTake(s_mutex, portMAX_DELAY);
 

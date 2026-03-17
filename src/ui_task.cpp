@@ -12,6 +12,7 @@
 #include "gesture.h"
 #include "history.h"
 #include "net_task.h"
+#include "dbglog.h"
 #include "display.h"
 #include "touch.h"
 #include "dbglog.h"
@@ -132,6 +133,7 @@ static const MenuItem s_menu[] = {
     {"Wikipedia", nullptr},  // internal search page
     {"Hackaday", "https://hackaday.com"},
     {"AI Chat", AICHAT_URL},
+    {"HTML test page", "https://www.wvc.edu/_resources/clutter/zz-test/_testing/test.aspx"},
 };
 static const int s_menu_count = sizeof(s_menu) / sizeof(s_menu[0]);
 
@@ -188,6 +190,7 @@ static void show_wiki_search() {
     lv_obj_set_pos(s_content, 0, 30);
     lv_obj_set_height(s_content, LV_VER_RES - 30);
     page_clear(s_content);
+    lv_obj_add_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -259,6 +262,7 @@ static void show_boot_menu() {
     lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_bg_color(s_content, bg, 0);
+    lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
 
     // Image — bottom-left, aligned to bottom of content area
     lv_obj_t *pig = lv_img_create(s_content);
@@ -304,17 +308,21 @@ static void show_boot_menu() {
         y_pos += 30;
     }
 
-    // Invert colours toggle
-    lv_obj_t *inv_btn = lv_label_create(s_content);
-    lv_label_set_text(inv_btn, inv ? "Dark Mode" : "Light Mode");
-    lv_obj_set_size(inv_btn, col_w, 36);
-    lv_obj_set_style_text_color(inv_btn, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(inv_btn, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_align(inv_btn, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_pad_top(inv_btn, 10, 0);
-    lv_obj_add_flag(inv_btn, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_FLOATING);
-    lv_obj_set_pos(inv_btn, col_x, y_pos + 4);
+    // Invert colours toggle — button on lv_scr_act, bottom aligned with links
+    lv_obj_t *inv_btn = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(inv_btn, 130, 32);
+    lv_obj_set_pos(inv_btn, col_x + (col_w - 130) / 2, LV_VER_RES - 36);
+    lv_obj_set_style_bg_color(inv_btn, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
+    lv_obj_set_style_radius(inv_btn, 4, 0);
+    lv_obj_set_style_shadow_width(inv_btn, 0, 0);
+    lv_obj_t *inv_lbl = lv_label_create(inv_btn);
+    lv_label_set_text(inv_lbl, inv ? "Dark Mode" : "Light Mode");
+    lv_obj_set_style_text_color(inv_lbl, lv_color_hex(inv ? 0x333333 : 0xCCCCCC), 0);
+    lv_obj_set_style_text_font(inv_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_center(inv_lbl);
     lv_obj_add_event_cb(inv_btn, [](lv_event_t *e) {
+        // Remove this button before rebuilding
+        lv_obj_del(lv_event_get_target(e));
         page_set_inverted(!page_is_inverted());
         lv_obj_set_style_bg_color(lv_scr_act(),
             lv_color_hex(page_is_inverted() ? 0xF0F0F0 : 0x1A1A2E), 0);
@@ -347,6 +355,7 @@ static void load_url(const char *url) {
             lv_obj_set_pos(s_content, 0, 0);
             lv_obj_set_height(s_content, LV_VER_RES);
         }
+        lv_obj_add_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
         page_show_spinner(s_content);
         // Add Stop button below spinner
         lv_obj_t *stop = lv_label_create(s_content);
@@ -602,6 +611,7 @@ static void img_toggle_cb(lv_event_t *e) {
 
 static void kb_show() {
     if (!s_kb || !s_content || !s_show_btn) return;
+    lv_obj_move_foreground(s_kb);
     lv_obj_clear_flag(s_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_show_btn, LV_OBJ_FLAG_HIDDEN);
     if (s_url_btn) lv_obj_add_flag(s_url_btn, LV_OBJ_FLAG_HIDDEN);
@@ -804,13 +814,27 @@ static void ui_task_fn(void *arg) {
                     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
                     lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
                                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+                    bool inv = page_is_inverted();
                     lv_obj_t *lbl = lv_label_create(s_content);
                     // Show error text from net_task (includes HTTP status if available)
                     const char *err_msg = (result && result->count > 0 && result->elems[0].text)
                                           ? result->elems[0].text : "Failed to load page.";
                     lv_label_set_text(lbl, err_msg);
-                    bool inv = page_is_inverted();
+                    lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+                    lv_obj_set_width(lbl, LV_PCT(100));
                     lv_obj_set_style_text_color(lbl, lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
+                    // Show debug log only for internal errors (no HTTP status)
+                    const char *log = dbglog_text();
+                    bool internal_err = (!result || result->http_status == 0) &&
+                                        log && log[0];
+                    if (internal_err) {
+                        lv_obj_t *dbg_lbl = lv_label_create(s_content);
+                        lv_label_set_text(dbg_lbl, log);
+                        lv_label_set_long_mode(dbg_lbl, LV_LABEL_LONG_WRAP);
+                        lv_obj_set_width(dbg_lbl, LV_PCT(100));
+                        lv_obj_set_style_text_color(dbg_lbl, lv_color_hex(inv ? 0x888888 : 0x666666), 0);
+                        lv_obj_set_style_text_font(dbg_lbl, &lv_font_montserrat_14, 0);
+                    }
                     // Retry button (flat label, clickable)
                     lv_obj_t *btn = lv_label_create(s_content);
                     lv_label_set_text(btn, "Retry");

@@ -102,15 +102,18 @@ static uint32_t parse_style_color(const char *tag_str) {
 
 static bool add_elem(ParseResult *r, ElemType type, const char *text,
                      size_t text_len, const char *href, uint8_t level,
-                     bool bold = false, uint32_t color = 0) {
+                     bool bold = false, uint32_t color = 0,
+                     bool italic = false, bool monospace = false) {
     if (r->count >= MAX_ELEMENTS) return false;
     if (type != ELEM_LINEBREAK && text_len == 0) return true;
     PageElement *e = &r->elems[r->count];
     memset(e, 0, sizeof(*e));
-    e->type  = type;
-    e->level = level;
-    e->bold  = bold;
-    e->color = color;
+    e->type      = type;
+    e->level     = level;
+    e->bold      = bold;
+    e->italic    = italic;
+    e->monospace = monospace;
+    e->color     = color;
     e->text  = pool_add(r, text, text_len);
     if (type == ELEM_LINK && href)
         e->href = pool_add(r, href, strlen(href));
@@ -271,9 +274,18 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
     int      textarea_elem = -1;     // index of current ELEM_INPUT (textarea)
     bool     in_bold = false;
     bool     acc_all_bold = true;   // true if ALL accumulated text is bold
+    bool     in_italic = false;
+    bool     acc_all_italic = true;
+    bool     in_mono = false;
+    bool     acc_all_mono = true;
     uint32_t cur_color = 0;        // current inline color (0 = default)
     uint32_t acc_color = 0;        // color seen during accumulation
     int      color_depth = 0;      // nesting depth of color-setting tags
+    // List state — stack for nested lists
+    #define MAX_LIST_DEPTH 4
+    struct { bool ordered; int counter; } list_stack[MAX_LIST_DEPTH];
+    int      list_depth = 0;
+    size_t   acc_prefix_len = 0;  // length of list bullet/number prefix in accumulator
 
     const char *p = html;
 
@@ -290,12 +302,23 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 add_elem(r, in_link ? ELEM_LINK : cur_type,
                          text_acc + start, len,
                          in_link ? link_href : NULL,
-                         cur_level, acc_all_bold, acc_color);
+                         cur_level, acc_all_bold, acc_color,
+                         acc_all_italic, acc_all_mono);
             }
             acc_len = 0;
+            acc_prefix_len = 0;
             acc_all_bold = true;
+            acc_all_italic = true;
+            acc_all_mono = true;
             acc_color = cur_color;
         }
+    };
+
+    // Check if accumulator has alphanumeric content beyond any list prefix
+    auto acc_has_word = [&]() -> bool {
+        for (size_t j = acc_prefix_len; j < acc_len; j++)
+            if (isalnum((uint8_t)text_acc[j])) return true;
+        return false;
     };
 
     while (*p) {
@@ -331,6 +354,8 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                         } else {
                             text_acc[acc_len++] = mapped;
                             if (!in_bold) acc_all_bold = false;
+                    if (!in_italic) acc_all_italic = false;
+                    if (!in_mono) acc_all_mono = false;
                             if (cur_color) acc_color = cur_color;
                         }
                     }
@@ -342,6 +367,8 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 } else {
                     text_acc[acc_len++] = *p;
                     if (!in_bold) acc_all_bold = false;
+                    if (!in_italic) acc_all_italic = false;
+                    if (!in_mono) acc_all_mono = false;
                     if (cur_color) acc_color = cur_color;
                 }
             }
@@ -428,6 +455,36 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
             flush_acc();
             add_elem(r, ELEM_LINEBREAK, "", 0, NULL, 0);
         }
+        // Blockquote — prefix lines with indent
+        else if (tag_is(name, name_len, "blockquote")) {
+            flush_acc();
+            if (!closing) {
+                // Prepend indent marker to accumulated text
+                if (acc_len + 2 < sizeof(text_acc)) {
+                    text_acc[acc_len++] = ' ';
+                    text_acc[acc_len++] = ' ';
+                }
+            }
+        }
+        // Definition list
+        else if (tag_is(name, name_len, "dl")) {
+            flush_acc();
+        }
+        else if (tag_is(name, name_len, "dt")) {
+            flush_acc();
+            if (!closing) in_bold = true;
+            else in_bold = false;
+        }
+        else if (tag_is(name, name_len, "dd")) {
+            flush_acc();
+            if (!closing && acc_len + 4 < sizeof(text_acc)) {
+                text_acc[acc_len++] = ' ';
+                text_acc[acc_len++] = ' ';
+                text_acc[acc_len++] = '-';
+                text_acc[acc_len++] = ' ';
+                acc_prefix_len = acc_len;
+            }
+        }
         // Links
         else if (tag_is(name, name_len, "a")) {
             flush_acc();
@@ -452,11 +509,34 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 link_href[0] = '\0';
             }
         }
-        // Bold — don't flush, to avoid creating line breaks
+        // Bold — flush to separate styled segments
         else if (tag_is(name, name_len, "b") ||
                  tag_is(name, name_len, "strong")) {
+            if (closing || acc_has_word()) flush_acc();
             in_bold = !closing;
         }
+        // Italic/emphasis — render in grey
+        else if (tag_is(name, name_len, "em") ||
+                 tag_is(name, name_len, "i") ||
+                 tag_is(name, name_len, "dfn")) {
+            if (closing || acc_has_word()) flush_acc();
+            in_italic = !closing;
+        }
+        // Monospace — code/kbd/samp
+        else if (tag_is(name, name_len, "code") ||
+                 tag_is(name, name_len, "kbd") ||
+                 tag_is(name, name_len, "samp") ||
+                 tag_is(name, name_len, "var") ||
+                 tag_is(name, name_len, "pre")) {
+            if (closing || acc_has_word()) flush_acc();
+            in_mono = !closing;
+        }
+        // Inline quote — insert quote marks
+        else if (tag_is(name, name_len, "q")) {
+            if (acc_len < sizeof(text_acc) - 1)
+                text_acc[acc_len++] = '"';
+        }
+
         // Inline color: <span style="color:...">, <font color="...">
         else if (tag_is(name, name_len, "span") ||
                  tag_is(name, name_len, "font")) {
@@ -735,9 +815,67 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 }
             }
         }
+        // Lists
+        else if (tag_is(name, name_len, "ul") ||
+                 tag_is(name, name_len, "ol")) {
+            flush_acc();
+            if (!closing) {
+                if (list_depth < MAX_LIST_DEPTH) {
+                    list_stack[list_depth].ordered = tag_is(name, name_len, "ol");
+                    list_stack[list_depth].counter = 0;
+                    list_depth++;
+                }
+            } else {
+                if (list_depth > 0) list_depth--;
+            }
+        }
+        // List item
+        else if (tag_is(name, name_len, "li")) {
+            flush_acc();
+            if (!closing && list_depth > 0) {
+                auto &ls = list_stack[list_depth - 1];
+                ls.counter++;
+                // Prepend indent + bullet/number to accumulator
+                for (int d = 1; d < list_depth; d++) {
+                    if (acc_len + 2 < sizeof(text_acc)) {
+                        text_acc[acc_len++] = ' ';
+                        text_acc[acc_len++] = ' ';
+                    }
+                }
+                if (ls.ordered) {
+                    char num[12];
+                    int n = snprintf(num, sizeof(num), "%d. ", ls.counter);
+                    if (acc_len + n < sizeof(text_acc)) {
+                        memcpy(text_acc + acc_len, num, n);
+                        acc_len += n;
+                    }
+                } else {
+                    if (acc_len + 2 < sizeof(text_acc)) {
+                        text_acc[acc_len++] = '*';
+                        text_acc[acc_len++] = ' ';
+                    }
+                }
+                acc_prefix_len = acc_len;
+            }
+        }
+        // Table — track nesting for grey text
+        else if (tag_is(name, name_len, "table")) {
+            flush_acc();
+            in_italic = !closing;
+        }
+        // Table header — bold within table
+        else if (tag_is(name, name_len, "th")) {
+            flush_acc();
+            if (!closing) in_bold = true;
+            else in_bold = false;
+        }
+        // Horizontal rule
+        else if (tag_is(name, name_len, "hr") && !closing) {
+            flush_acc();
+            add_elem(r, ELEM_HR, "", 0, NULL, 0);
+        }
         // Block elements — paragraph break
         else if (tag_is(name, name_len, "div") ||
-                 tag_is(name, name_len, "li")  ||
                  tag_is(name, name_len, "td")  ||
                  tag_is(name, name_len, "tr")) {
             flush_acc();
