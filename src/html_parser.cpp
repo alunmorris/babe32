@@ -150,7 +150,7 @@ static bool get_attr(const char *tag, const char *attr, char *out, size_t out_le
     return false;
 }
 
-static void decode_entities(char *s) {
+static void decode_entities_once(char *s) {
     char *r = s, *w = s;
     while (*r) {
         if (*r == '&') {
@@ -211,6 +211,12 @@ static void decode_entities(char *s) {
     *w = '\0';
 }
 
+// Run decode twice to handle double-encoded entities like &amp;lt; → &lt; → <
+static void decode_entities(char *s) {
+    decode_entities_once(s);
+    if (strchr(s, '&')) decode_entities_once(s);
+}
+
 // IDs commonly used for "skip to main content" targets
 static const char * const s_content_ids[] = {
     "main", "content", "primary", "container", "wrapper",
@@ -255,6 +261,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
     char     skip_to_id[128] = "";  // target id from skip-to-content link
     bool     found_content = false; // true once we've hit the target id
     // Form state
+    int      cur_form_id = -1;     // current form index (-1 = outside form)
     bool     in_select   = false;
     int      select_elem = -1;       // index of current ELEM_SELECT in elems[]
     char     select_name[128] = "";
@@ -477,6 +484,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
             char alt[256] = "";
             get_attr(tag_str, "src", src, sizeof(src));
             get_attr(tag_str, "alt", alt, sizeof(alt));
+            if (alt[0]) decode_entities(alt);
             if (src[0] && r->count < MAX_ELEMENTS) {
                 char resolved[512];
                 if (url_resolve(url_get_base(), src, resolved, sizeof(resolved))) {
@@ -537,17 +545,31 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
             if (!closing) {
                 char action_raw[512] = "";
                 get_attr(tag_str, "action", action_raw, sizeof(action_raw));
+                char resolved_action[512] = "";
                 if (action_raw[0]) {
                     char resolved[512];
                     if (url_resolve(url_get_base(), action_raw,
                                     resolved, sizeof(resolved)))
-                        strncpy(r->form_action, resolved, sizeof(r->form_action) - 1);
+                        strncpy(resolved_action, resolved, sizeof(resolved_action) - 1);
                 } else {
-                    strncpy(r->form_action, base_url, sizeof(r->form_action) - 1);
+                    strncpy(resolved_action, base_url, sizeof(resolved_action) - 1);
                 }
                 char method[16] = "get";
                 get_attr(tag_str, "method", method, sizeof(method));
-                r->form_is_post = (strcasecmp(method, "post") == 0);
+                // Legacy: first form stored in form_action/form_is_post
+                if (r->form_count == 0) {
+                    strncpy(r->form_action, resolved_action, sizeof(r->form_action) - 1);
+                    r->form_is_post = (strcasecmp(method, "post") == 0);
+                }
+                // Per-form storage
+                if (r->form_count < MAX_FORMS) {
+                    cur_form_id = r->form_count;
+                    FormInfo *fi = &r->forms[r->form_count++];
+                    strncpy(fi->action, resolved_action, sizeof(fi->action) - 1);
+                    fi->is_post = (strcasecmp(method, "post") == 0);
+                }
+            } else {
+                cur_form_id = -1;
             }
         }
         // Input (self-closing)
@@ -566,20 +588,26 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 if (r->count < MAX_ELEMENTS) {
                     PageElement *e = &r->elems[r->count];
                     memset(e, 0, sizeof(*e));
-                    e->type  = ELEM_HIDDEN;
-                    e->name  = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
-                    e->value = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
+                    e->type    = ELEM_HIDDEN;
+                    e->form_id = cur_form_id >= 0 ? (uint8_t)cur_form_id : 0;
+                    e->name    = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
+                    e->value   = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
                     r->count++;
                 }
             } else if (strcasecmp(itype, "submit") == 0) {
-                const char *label = fvalue[0] ? fvalue : "Submit";
+                // Decode for display label only; store raw value for form data
+                char label[256];
+                strncpy(label, fvalue[0] ? fvalue : "Submit", sizeof(label) - 1);
+                label[sizeof(label) - 1] = '\0';
+                decode_entities(label);
                 if (r->count < MAX_ELEMENTS) {
                     PageElement *e = &r->elems[r->count];
                     memset(e, 0, sizeof(*e));
-                    e->type  = ELEM_SUBMIT;
-                    e->text  = pool_add(r, label, strlen(label));
-                    e->name  = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
-                    e->value = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
+                    e->type    = ELEM_SUBMIT;
+                    e->form_id = cur_form_id >= 0 ? (uint8_t)cur_form_id : 0;
+                    e->text    = pool_add(r, label, strlen(label));
+                    e->name    = fname[0] ? pool_add(r, fname, strlen(fname)) : NULL;
+                    e->value   = fvalue[0] ? pool_add(r, fvalue, strlen(fvalue)) : NULL;
                     r->count++;
                 }
             } else if (strcasecmp(itype, "text") == 0 ||
@@ -587,6 +615,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                        strcasecmp(itype, "email") == 0 ||
                        strcasecmp(itype, "url") == 0 ||
                        strcasecmp(itype, "password") == 0) {
+                if (placeholder[0]) decode_entities(placeholder);
                 if (r->count < MAX_ELEMENTS) {
                     PageElement *e = &r->elems[r->count];
                     memset(e, 0, sizeof(*e));

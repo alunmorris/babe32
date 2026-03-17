@@ -18,8 +18,9 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                  bool show_images = false);
 
 // Collect form data from container into URL-encoded string
+// form_id scopes hidden fields to a specific form (-1 = all)
 void collect_form_data(lv_obj_t *container, const ParseResult *result,
-                       char *out, size_t out_len);
+                       char *out, size_t out_len, int form_id = -1);
 
 // Clear the page container
 void page_clear(lv_obj_t *container);

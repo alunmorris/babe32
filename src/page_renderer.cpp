@@ -128,13 +128,15 @@ static size_t url_encode(const char *src, char *out, size_t out_len) {
 }
 
 // Collect form data from container's textareas/dropdowns + hidden fields
+// If form_id >= 0, only include hidden fields belonging to that form.
 void collect_form_data(lv_obj_t *container, const ParseResult *result,
-                               char *out, size_t out_len) {
+                               char *out, size_t out_len, int form_id) {
     size_t w = 0;
-    // Hidden fields first
+    // Hidden fields first (scoped to form_id)
     for (int i = 0; i < result->count && w < out_len - 1; i++) {
         const PageElement *e = &result->elems[i];
         if (e->type != ELEM_HIDDEN || !e->name) continue;
+        if (form_id >= 0 && e->form_id != (uint8_t)form_id) continue;
         if (w > 0) out[w++] = '&';
         w += url_encode(e->name, out + w, out_len - w);
         out[w++] = '=';
@@ -170,11 +172,13 @@ static void form_submit_click_cb(lv_event_t *e) {
     lv_indev_t *indev = lv_indev_get_act();
     if (indev && lv_indev_get_scroll_obj(indev) != NULL) return;
 
+    const PageElement *btn_elem = (const PageElement *)lv_event_get_user_data(e);
+    int fid = btn_elem ? (int)btn_elem->form_id : -1;
+
     static char form_data[4096];
-    collect_form_data(s_cur_container, s_cur_result, form_data, sizeof(form_data));
+    collect_form_data(s_cur_container, s_cur_result, form_data, sizeof(form_data), fid);
 
     // Append clicked submit button's name=value if it has a name
-    const PageElement *btn_elem = (const PageElement *)lv_event_get_user_data(e);
     if (btn_elem && btn_elem->name) {
         size_t w = strlen(form_data);
         if (w > 0 && w < sizeof(form_data) - 1) form_data[w++] = '&';
@@ -185,7 +189,14 @@ static void form_submit_click_cb(lv_event_t *e) {
         form_data[w] = '\0';
     }
 
-    s_submit_cb(s_cur_result->form_action, s_cur_result->form_is_post, form_data);
+    // Use per-form action/method if available
+    const char *action = s_cur_result->form_action;
+    bool is_post = s_cur_result->form_is_post;
+    if (fid >= 0 && fid < s_cur_result->form_count) {
+        action = s_cur_result->forms[fid].action;
+        is_post = s_cur_result->forms[fid].is_post;
+    }
+    s_submit_cb(action, is_post, form_data);
 }
 
 void page_clear(lv_obj_t *container) {

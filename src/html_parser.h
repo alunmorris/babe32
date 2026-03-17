@@ -23,20 +23,29 @@ typedef struct {
     char    *name;    // form field name (ELEM_INPUT/HIDDEN/SELECT)
     char    *value;   // default value (ELEM_INPUT/HIDDEN) or options (ELEM_SELECT, \n-separated)
     uint8_t  level;   // 1-6 for ELEM_HEADING, 0 otherwise
+    uint8_t  form_id;  // form scope index (for HIDDEN/SUBMIT/INPUT/SELECT)
     bool     multiline; // true for <textarea>
     bool     bold;      // true if inside <b>/<strong>
     uint32_t color;     // 0 = default, else 0xRRGGBB | 0x01000000 flag
 } PageElement;
 
 #define MAX_ELEMENTS 1024
+#define MAX_FORMS    8
+
+typedef struct {
+    char action[512];
+    bool is_post;
+} FormInfo;
 
 typedef struct {
     PageElement elems[MAX_ELEMENTS];
     int         count;
     bool        error;              // true if fetch/parse failed
     int         http_status;        // HTTP status code (e.g. 404), 0 if unknown
-    char        form_action[512];   // form action URL (resolved)
-    bool        form_is_post;       // true = POST, false = GET
+    char        form_action[512];   // first form action (legacy, kept for compat)
+    bool        form_is_post;       // first form method
+    FormInfo    forms[MAX_FORMS];
+    int         form_count;
     char        text_pool[131072];  // 128KB inline text pool
     size_t      pool_used;
 } ParseResult;

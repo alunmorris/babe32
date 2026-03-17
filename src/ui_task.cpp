@@ -90,6 +90,7 @@ static ParseResult      *s_cur_result    = nullptr;
 static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
 static bool              s_loading       = false;
+static lv_obj_t         *s_wiki_ta      = nullptr;  // wiki search textarea
 static bool              s_stop_rendered = false; // true after Stop rendered partial page
 static char              s_pending_url[512] = "";
 volatile int             g_fetch_kb = 0;
@@ -105,11 +106,14 @@ static void do_navigate(const char *url);
 static void load_url(const char *url);
 static void retry_current();
 static void stop_btn_cb(lv_event_t *e);
+static void on_field_focus(lv_obj_t *textarea);
+static void on_home();
 
 static void kb_show();
 static void kb_hide();
 
 static void on_back() {
+    if (s_wiki_ta) { on_home(); return; }
     const char *url = history_back();
     if (url) load_url(url);
 }
@@ -125,15 +129,114 @@ static void show_boot_menu();
 struct MenuItem { const char *label; const char *url; };
 static const MenuItem s_menu[] = {
     {"Search", HOMEPAGE},
-    {"Wikipedia", "https://en.wikipedia.org/wiki/Main_Page"},
+    {"Wikipedia", nullptr},  // internal search page
     {"Hackaday", "https://hackaday.com"},
     {"AI Chat", AICHAT_URL},
 };
 static const int s_menu_count = sizeof(s_menu) / sizeof(s_menu[0]);
 
+static void show_wiki_search();
+
+static void enable_urls_mode() {
+    s_show_links = true;
+    if (s_url_btn)
+        lv_obj_set_style_text_color(s_url_btn, lv_color_hex(0x4FC3F7), 0);
+}
+
 static void menu_item_cb(lv_event_t *e) {
-    const char *url = (const char *)lv_event_get_user_data(e);
-    if (url) do_navigate(url);
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx >= 0 && idx < s_menu_count) {
+        const char *label = s_menu[idx].label;
+        if (strcmp(label, "Search") == 0 || strcmp(label, "Wikipedia") == 0)
+            enable_urls_mode();
+        if (s_menu[idx].url)
+            do_navigate(s_menu[idx].url);
+        else if (strcmp(label, "Wikipedia") == 0)
+            show_wiki_search();
+    }
+}
+
+static void wiki_search_cb(lv_event_t *e) {
+    if (!s_wiki_ta) return;
+    const char *text = lv_textarea_get_text(s_wiki_ta);
+    if (!text || !text[0]) return;
+
+    // URL-encode the search text
+    char encoded[512];
+    size_t w = 0;
+    for (const char *p = text; *p && w < sizeof(encoded) - 4; p++) {
+        char c = *p;
+        if (c == ' ') { encoded[w++] = '+'; }
+        else if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded[w++] = c;
+        } else {
+            w += snprintf(encoded + w, sizeof(encoded) - w, "%%%02X", (uint8_t)c);
+        }
+    }
+    encoded[w] = '\0';
+
+    char url[768];
+    snprintf(url, sizeof(url),
+             "https://en.wikipedia.org/w/index.php?search=%s", encoded);
+    do_navigate(url);
+}
+
+static void show_wiki_search() {
+    if (!lvgl_lock(50)) return;
+    header_set_visible(true);
+    if (s_aichat_home) lv_obj_add_flag(s_aichat_home, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(s_content, 0, 30);
+    lv_obj_set_height(s_content, LV_VER_RES - 30);
+    page_clear(s_content);
+    lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    // Title
+    lv_obj_t *title = lv_label_create(s_content);
+    lv_label_set_text(title, "Wikipedia Search");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x00C853), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_pad_bottom(title, 12, 0);
+
+    // Search input
+    s_wiki_ta = lv_textarea_create(s_content);
+    lv_obj_t *ta = s_wiki_ta;
+    lv_obj_set_width(ta, LV_PCT(80));
+    lv_obj_set_height(ta, 32);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_placeholder_text(ta, "Search Wikipedia...");
+    lv_obj_set_style_bg_color(ta, lv_color_hex(0x16213E), 0);
+    lv_obj_set_style_text_color(ta, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_border_width(ta, 1, 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_radius(ta, 0, 0);
+    lv_obj_set_style_shadow_width(ta, 0, 0);
+    lv_obj_set_style_pad_all(ta, 4, 0);
+
+    // Search button
+    lv_obj_t *btn = lv_label_create(s_content);
+    lv_label_set_text(btn, "Search");
+    lv_obj_set_size(btn, 80, 32);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_text_color(btn, lv_color_hex(0x4FC3F7), 0);
+    lv_obj_set_style_text_align(btn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(btn, 8, 0);
+    lv_obj_set_style_radius(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_border_width(btn, 0, 0);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(btn, wiki_search_cb, LV_EVENT_CLICKED, ta);
+
+    // Tap textarea to show keyboard
+    lv_obj_add_event_cb(ta, [](lv_event_t *e) {
+        on_field_focus(lv_event_get_target(e));
+    }, LV_EVENT_CLICKED, NULL);
+
+    header_set_url("");
+    lvgl_unlock();
 }
 
 static void show_boot_menu() {
@@ -164,7 +267,7 @@ static void show_boot_menu() {
         lv_obj_set_style_pad_all(item, 8, 0);
         lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(item, menu_item_cb, LV_EVENT_CLICKED,
-                            (void *)s_menu[i].url);
+                            (void *)(intptr_t)i);
     }
 
     header_set_url("");
@@ -214,6 +317,7 @@ static void load_url(const char *url) {
     g_fetch_kb = 0;
     s_loading = true;
     s_stop_rendered = false;
+    s_wiki_ta = nullptr;
     net_task_load(url);
 }
 
@@ -234,7 +338,11 @@ static void on_page_ready(ParseResult *result, const char *url) {
 static void on_form_submit(const char *action_url, bool is_post,
                             const char *encoded_body) {
     if (is_post) {
-        history_push(action_url);
+        // Push GET-style URL so Back can re-fetch results
+        char history_url[1024];
+        const char *sep = strchr(action_url, '?') ? "&" : "?";
+        snprintf(history_url, sizeof(history_url), "%s%s%s", action_url, sep, encoded_body);
+        history_push(history_url);
         bool aichat = strstr(action_url, AICHAT_URL) != nullptr;
         header_set_url(aichat ? "" : action_url);
         update_nav_buttons();
@@ -368,6 +476,10 @@ static void kb_event_cb(lv_event_t *e) {
                 kb_hide();
                 do_navigate(url);
             }
+        } else if (s_wiki_ta && ta == s_wiki_ta) {
+            // Enter on wiki search — trigger search
+            kb_hide();
+            wiki_search_cb(nullptr);
         } else {
             // Enter on form field — submit the form
             kb_hide();
