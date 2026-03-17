@@ -482,6 +482,11 @@ void ui_build_root() {
     lv_obj_set_scroll_dir(s_content, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_content, LV_SCROLLBAR_MODE_AUTO);
 
+    lv_obj_add_flag(s_content, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_content, [](lv_event_t *e) {
+        if (s_kb_visible) kb_hide();
+    }, LV_EVENT_CLICKED, NULL);
+
     gesture_attach(s_content, on_back, on_forward);
 
     // Keyboard — hidden by default, minimal flat styling

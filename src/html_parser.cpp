@@ -223,7 +223,7 @@ static const char * const s_content_ids[] = {
     "page-content", "pageContent",
     "page-body", "pageBody",
     "primary-content", "primaryContent",
-    "site-content", "siteContent",
+    "site-content", "siteContent", "site-main", "siteMain",
     "app-content", "appContent",
     "layout-content", "layoutContent",
     "article-content", "articleContent",
@@ -532,7 +532,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
             }
         }
         // Form
-        else if (tag_is(name, name_len, "form")) {
+        if (tag_is(name, name_len, "form")) {
             flush_acc();
             if (!closing) {
                 char action_raw[512] = "";
