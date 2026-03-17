@@ -7,15 +7,20 @@
 #include <string.h>
 #include <esp_heap_caps.h>
 
-#define COLOUR_BG      lv_color_hex(0x1A1A2E)
-#define COLOUR_TEXT    lv_color_hex(0xE0E0E0)
-#define COLOUR_HEADING lv_color_hex(0xFFFFFF)
-#define COLOUR_LINK    lv_color_hex(0x4FC3F7)
-#define COLOUR_LINK_BG lv_color_hex(0x16213E)
-#define COLOUR_FIELD   lv_color_hex(0x16213E)
-#define COLOUR_BORDER  lv_color_hex(0x0F3460)
-#define COLOUR_BTN_BG  lv_color_hex(0x0F3460)
-#define COLOUR_BTN_TXT lv_color_hex(0x4FC3F7)
+static bool s_inverted = false;
+
+#define COLOUR_BG      lv_color_hex(s_inverted ? 0xF0F0F0 : 0x1A1A2E)
+#define COLOUR_TEXT    lv_color_hex(s_inverted ? 0x1A1A1A : 0xE0E0E0)
+#define COLOUR_HEADING lv_color_hex(s_inverted ? 0x000000 : 0xFFFFFF)
+#define COLOUR_LINK    lv_color_hex(s_inverted ? 0x0066CC : 0x4FC3F7)
+#define COLOUR_LINK_BG lv_color_hex(s_inverted ? 0xE0E8F0 : 0x16213E)
+#define COLOUR_FIELD   lv_color_hex(s_inverted ? 0xFFFFFF : 0x16213E)
+#define COLOUR_BORDER  lv_color_hex(s_inverted ? 0xCCCCCC : 0x0F3460)
+#define COLOUR_BTN_BG  lv_color_hex(s_inverted ? 0xE0E0E0 : 0x0F3460)
+#define COLOUR_BTN_TXT lv_color_hex(s_inverted ? 0x0066CC : 0x4FC3F7)
+
+void page_set_inverted(bool inv) { s_inverted = inv; }
+bool page_is_inverted() { return s_inverted; }
 
 LV_FONT_DECLARE(lv_font_montserrat_bold_14);
 
@@ -79,7 +84,7 @@ static void img_click_cb(lv_event_t *e) {
     create_overlay_base();
     lv_obj_t *lbl = lv_label_create(s_overlay);
     lv_label_set_text(lbl, "Loading...");
-    lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_color(lbl, COLOUR_TEXT, 0);
     lv_obj_center(lbl);
 }
 
@@ -209,12 +214,13 @@ void page_clear(lv_obj_t *container) {
 
 void page_show_spinner(lv_obj_t *container) {
     page_clear(container);
+    lv_obj_set_style_bg_color(container, COLOUR_BG, 0);
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *lbl = lv_label_create(container);
     lv_label_set_text(lbl, "Loading...");
-    lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_color(lbl, COLOUR_TEXT, 0);
 }
 
 void page_render(lv_obj_t *container, const ParseResult *result,
@@ -233,6 +239,7 @@ void page_render(lv_obj_t *container, const ParseResult *result,
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_bg_color(container, COLOUR_BG, 0);
     lv_obj_set_style_pad_all(container, 8, 0);
     lv_obj_set_style_pad_gap(container, 4, 0);
 
@@ -513,7 +520,7 @@ void page_img_full_fail() {
     lv_obj_add_event_cb(s_overlay, overlay_close_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *lbl = lv_label_create(s_overlay);
     lv_label_set_text(lbl, "Failed to load image\nTap to close");
-    lv_obj_set_style_text_color(lbl, lv_color_hex(0xE0E0E0), 0);
+    lv_obj_set_style_text_color(lbl, COLOUR_TEXT, 0);
     lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(lbl);
 }

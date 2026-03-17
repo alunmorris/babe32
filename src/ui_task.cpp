@@ -206,11 +206,12 @@ static void show_wiki_search() {
     lv_obj_set_height(ta, 32);
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_placeholder_text(ta, "Search Wikipedia...");
-    lv_obj_set_style_bg_color(ta, lv_color_hex(0x16213E), 0);
-    lv_obj_set_style_text_color(ta, lv_color_hex(0xE0E0E0), 0);
+    bool inv = page_is_inverted();
+    lv_obj_set_style_bg_color(ta, lv_color_hex(inv ? 0xFFFFFF : 0x16213E), 0);
+    lv_obj_set_style_text_color(ta, lv_color_hex(inv ? 0x1A1A1A : 0xE0E0E0), 0);
     lv_obj_set_style_text_font(ta, &lv_font_montserrat_14, 0);
     lv_obj_set_style_border_width(ta, 1, 0);
-    lv_obj_set_style_border_color(ta, lv_color_hex(0x0F3460), 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
     lv_obj_set_style_radius(ta, 0, 0);
     lv_obj_set_style_shadow_width(ta, 0, 0);
     lv_obj_set_style_pad_all(ta, 4, 0);
@@ -220,8 +221,8 @@ static void show_wiki_search() {
     lv_label_set_text(btn, "Search");
     lv_obj_set_size(btn, 80, 32);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
-    lv_obj_set_style_text_color(btn, lv_color_hex(0x4FC3F7), 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(inv ? 0xE0E0E0 : 0x0F3460), 0);
+    lv_obj_set_style_text_color(btn, lv_color_hex(inv ? 0x0066CC : 0x4FC3F7), 0);
     lv_obj_set_style_text_align(btn, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_top(btn, 8, 0);
     lv_obj_set_style_radius(btn, 0, 0);
@@ -239,6 +240,8 @@ static void show_wiki_search() {
     lvgl_unlock();
 }
 
+extern const lv_img_dsc_t babe32_img;
+
 static void show_boot_menu() {
     if (!lvgl_lock(50)) return;
     // Restore header if hidden (e.g. returning from AI chat)
@@ -247,28 +250,76 @@ static void show_boot_menu() {
     lv_obj_set_pos(s_content, 0, 30);
     lv_obj_set_height(s_content, LV_VER_RES - 30);
     page_clear(s_content);
+
+    bool inv = page_is_inverted();
+    lv_color_t bg = lv_color_hex(inv ? 0xF0F0F0 : 0x1A1A2E);
+
+    // No flex on content — use manual positioning
     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_bg_color(s_content, bg, 0);
 
-    // Title
+    // Image — bottom-left, aligned to bottom of content area
+    lv_obj_t *pig = lv_img_create(s_content);
+    lv_img_set_src(pig, &babe32_img);
+    lv_obj_clear_flag(pig, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(pig, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_pos(pig, -lv_obj_get_style_pad_left(s_content, 0),
+                        lv_obj_get_height(s_content) - 290
+                        - lv_obj_get_style_pad_top(s_content, 0));
+
+    // Right column for title + menu — offset past the image
+    int col_x = 165;
+    int col_w = LV_HOR_RES - col_x;
+
+    // Title — two lines
     lv_obj_t *title = lv_label_create(s_content);
-    lv_label_set_text(title, "MINT");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xFFFFFF), 0);
+    lv_label_set_text(title, "Barely Adequate\nBrowser ESP32\n");
+    lv_obj_set_width(title, col_w);
+    lv_obj_set_style_text_color(title,
+        lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_style_pad_bottom(title, 16, 0);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(title, 8, 0);
+    lv_obj_set_style_pad_bottom(title, 12, 0);
+    lv_obj_add_flag(title, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_pos(title, col_x, 8);
 
-    // Menu items
+    // Menu items — positioned in right column
+    int y_pos = 80;
     for (int i = 0; i < s_menu_count; i++) {
         lv_obj_t *item = lv_label_create(s_content);
         lv_label_set_text(item, s_menu[i].label);
-        lv_obj_set_style_text_color(item, lv_color_hex(0x4FC3F7), 0);
+        lv_obj_set_width(item, col_w);
+        lv_obj_set_style_text_color(item,
+            lv_color_hex(inv ? 0x0066CC : 0x4FC3F7), 0);
         lv_obj_set_style_text_font(item, &lv_font_montserrat_18, 0);
-        lv_obj_set_style_pad_all(item, 8, 0);
-        lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_text_align(item, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_pad_all(item, 6, 0);
+        lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_FLOATING);
+        lv_obj_set_pos(item, col_x, y_pos);
         lv_obj_add_event_cb(item, menu_item_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)i);
+        y_pos += 30;
     }
+
+    // Invert colours toggle
+    lv_obj_t *inv_btn = lv_label_create(s_content);
+    lv_label_set_text(inv_btn, inv ? "Dark Mode" : "Light Mode");
+    lv_obj_set_size(inv_btn, col_w, 36);
+    lv_obj_set_style_text_color(inv_btn, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_font(inv_btn, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(inv_btn, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(inv_btn, 10, 0);
+    lv_obj_add_flag(inv_btn, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_pos(inv_btn, col_x, y_pos + 4);
+    lv_obj_add_event_cb(inv_btn, [](lv_event_t *e) {
+        page_set_inverted(!page_is_inverted());
+        lv_obj_set_style_bg_color(lv_scr_act(),
+            lv_color_hex(page_is_inverted() ? 0xF0F0F0 : 0x1A1A2E), 0);
+        show_boot_menu();
+    }, LV_EVENT_CLICKED, nullptr);
 
     header_set_url("");
     lvgl_unlock();
@@ -758,14 +809,15 @@ static void ui_task_fn(void *arg) {
                     const char *err_msg = (result && result->count > 0 && result->elems[0].text)
                                           ? result->elems[0].text : "Failed to load page.";
                     lv_label_set_text(lbl, err_msg);
-                    lv_obj_set_style_text_color(lbl, lv_color_hex(0xFFFFFF), 0);
+                    bool inv = page_is_inverted();
+                    lv_obj_set_style_text_color(lbl, lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
                     // Retry button (flat label, clickable)
                     lv_obj_t *btn = lv_label_create(s_content);
                     lv_label_set_text(btn, "Retry");
                     lv_obj_set_size(btn, 80, 32);
                     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-                    lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
-                    lv_obj_set_style_text_color(btn, lv_color_hex(0x4FC3F7), 0);
+                    lv_obj_set_style_bg_color(btn, lv_color_hex(inv ? 0xE0E0E0 : 0x0F3460), 0);
+                    lv_obj_set_style_text_color(btn, lv_color_hex(inv ? 0x0066CC : 0x4FC3F7), 0);
                     lv_obj_set_style_text_align(btn, LV_TEXT_ALIGN_CENTER, 0);
                     lv_obj_set_style_pad_top(btn, 8, 0);
                     lv_obj_set_style_radius(btn, 0, 0);
@@ -793,6 +845,8 @@ static void ui_task_fn(void *arg) {
                         lv_obj_add_event_cb(s_aichat_home, aichat_home_cb, LV_EVENT_CLICKED, NULL);
                     }
                     lv_obj_align(s_aichat_home, LV_ALIGN_TOP_RIGHT, -4, 2);
+                    lv_obj_set_style_text_color(s_aichat_home,
+                        lv_color_hex(page_is_inverted() ? 0x333333 : 0xE0E0E0), 0);
                     lv_obj_clear_flag(s_aichat_home, LV_OBJ_FLAG_HIDDEN);
                 } else if (s_aichat_home) {
                     lv_obj_add_flag(s_aichat_home, LV_OBJ_FLAG_HIDDEN);

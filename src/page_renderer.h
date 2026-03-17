@@ -22,6 +22,10 @@ void page_render(lv_obj_t *container, const ParseResult *result,
 void collect_form_data(lv_obj_t *container, const ParseResult *result,
                        char *out, size_t out_len, int form_id = -1);
 
+// Toggle inverted colour scheme (light bg / dark text)
+void page_set_inverted(bool inv);
+bool page_is_inverted();
+
 // Clear the page container
 void page_clear(lv_obj_t *container);
 
