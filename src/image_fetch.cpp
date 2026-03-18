@@ -6,8 +6,14 @@
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <esp_heap_caps.h>
+#include <freertos/semphr.h>
 
 static WiFiClientSecure *s_img_client = nullptr;
+static SemaphoreHandle_t s_img_mutex = nullptr;
+
+static void img_mutex_init() {
+    if (!s_img_mutex) s_img_mutex = xSemaphoreCreateMutex();
+}
 
 static bool ensure_connected() {
     // Always free main fetcher's TLS to reclaim internal RAM for image SSL
@@ -224,19 +230,30 @@ static uint8_t *fetch_resized(const char *img_url, size_t *out_len,
 }
 
 uint8_t *image_fetch(const char *img_url, size_t *out_len) {
-    return fetch_resized(img_url, out_len,
+    img_mutex_init();
+    xSemaphoreTake(s_img_mutex, portMAX_DELAY);
+    uint8_t *r = fetch_resized(img_url, out_len,
                          IMAGE_THUMB_W, IMAGE_THUMB_H, 50, 128 * 1024);
+    xSemaphoreGive(s_img_mutex);
+    return r;
 }
 
 uint8_t *image_fetch_full(const char *img_url, size_t *out_len) {
-    return fetch_resized(img_url, out_len,
+    img_mutex_init();
+    xSemaphoreTake(s_img_mutex, portMAX_DELAY);
+    uint8_t *r = fetch_resized(img_url, out_len,
                          IMAGE_FULL_W, IMAGE_FULL_H, 80, 512 * 1024);
+    xSemaphoreGive(s_img_mutex);
+    return r;
 }
 
 void image_fetch_disconnect() {
+    img_mutex_init();
+    xSemaphoreTake(s_img_mutex, portMAX_DELAY);
     if (s_img_client) {
         s_img_client->stop();
         delete s_img_client;
         s_img_client = nullptr;
     }
+    xSemaphoreGive(s_img_mutex);
 }
