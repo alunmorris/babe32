@@ -214,7 +214,7 @@ void show_boot_menu() {
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_bottom(title, 12, 0);
     lv_obj_add_flag(title, LV_OBJ_FLAG_FLOATING);
-    lv_obj_set_pos(title, col_x, -2);
+    lv_obj_set_pos(title, col_x, 8);
 
     // Menu items
     int y_pos = 80;
