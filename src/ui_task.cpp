@@ -708,6 +708,9 @@ static void ui_task_fn(void *arg) {
             }
         }
 
+        // Check if WiFi portal finished — return to boot menu
+        boot_menu_portal_check();
+
         // WiFi connection monitor — check every 2 seconds
         {
             static uint32_t last_wifi_check = 0;

@@ -12,3 +12,4 @@ void show_boot_menu();
 void show_wiki_search();
 void boot_menu_wiki_submit();
 lv_obj_t *boot_menu_get_wiki_ta();
+bool boot_menu_portal_check();

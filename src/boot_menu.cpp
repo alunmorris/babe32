@@ -4,8 +4,10 @@
 #include "ui_header.h"
 #include "ui_buttons.h"
 #include "url_utils.h"
+#include "wifi_mgr.h"
 #include <Arduino.h>
 #include <string.h>
+#include <freertos/task.h>
 
 extern bool lvgl_lock(uint32_t ms);
 extern void lvgl_unlock();
@@ -19,6 +21,9 @@ static field_focus_cb_t  s_focus_cb   = nullptr;
 static urls_mode_cb_t    s_urls_cb    = nullptr;
 static lv_obj_t         *s_wiki_ta    = nullptr;
 static lv_obj_t         *s_inv_btn   = nullptr;
+static lv_obj_t         *s_wifi_btn  = nullptr;
+static volatile bool     s_portal_active = false;
+static volatile bool     s_portal_done   = false;
 
 struct MenuItem { const char *label; const char *url; };
 static const MenuItem s_menu[] = {
@@ -42,14 +47,15 @@ lv_obj_t *boot_menu_get_wiki_ta() {
     return s_wiki_ta;
 }
 
-static void hide_inv_btn() {
+static void hide_boot_buttons() {
     if (s_inv_btn) { lv_obj_del(s_inv_btn); s_inv_btn = nullptr; }
+    if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
 }
 
 static void menu_item_cb(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     if (idx >= 0 && idx < s_menu_count) {
-        hide_inv_btn();
+        hide_boot_buttons();
         const char *label = s_menu[idx].label;
         if (strcmp(label, "Search") == 0 || strcmp(label, "Wikipedia") == 0)
             if (s_urls_cb) s_urls_cb();
@@ -131,6 +137,41 @@ void show_wiki_search() {
     lvgl_unlock();
 }
 
+static void wifi_portal_task(void *arg) {
+    wifi_mgr_start_portal();
+    s_portal_active = false;
+    s_portal_done = true;
+    vTaskDelete(nullptr);
+}
+
+static void wifi_setup_cb(lv_event_t *e) {
+    if (s_portal_active) return;
+    s_portal_active = true;
+    // Show message on screen
+    if (lvgl_lock(50)) {
+        hide_boot_buttons();
+        if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
+        page_clear(s_content);
+        lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        bool inv = page_is_inverted();
+        lv_obj_t *lbl = lv_label_create(s_content);
+        lv_label_set_text(lbl, "WiFi Setup Active\n\n"
+            "Connect to AP:\n\"ESP32-Browser\"\n\n"
+            "Then open 192.168.4.1\nin your browser");
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(lbl, LV_PCT(80));
+        lv_obj_set_style_text_color(lbl, lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lvgl_unlock();
+    }
+    // Run portal on a separate task (it blocks)
+    xTaskCreatePinnedToCore(wifi_portal_task, "wifi_portal", 8192,
+                            nullptr, 2, nullptr, 0);
+}
+
 extern const lv_img_dsc_t babe32_img;
 
 void show_boot_menu() {
@@ -165,16 +206,15 @@ void show_boot_menu() {
 
     // Title
     lv_obj_t *title = lv_label_create(s_content);
-    lv_label_set_text(title, "Barely Adequate\nBrowser ESP32\n");
+    lv_label_set_text(title, "Barely Adequate Browser ESP32");
     lv_obj_set_width(title, col_w);
     lv_obj_set_style_text_color(title,
         lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_pad_top(title, 8, 0);
     lv_obj_set_style_pad_bottom(title, 12, 0);
     lv_obj_add_flag(title, LV_OBJ_FLAG_FLOATING);
-    lv_obj_set_pos(title, col_x, 8);
+    lv_obj_set_pos(title, col_x, -2);
 
     // Menu items
     int y_pos = 80;
@@ -194,28 +234,59 @@ void show_boot_menu() {
         y_pos += 30;
     }
 
-    // Light/Dark mode toggle button
+    // Light/Dark mode toggle button (narrower) + WiFi Setup button
+    int btn_w = 90;
+    int btn_gap = 8;
+    int total_w = btn_w * 2 + btn_gap;
+    int btn_x = col_x + (col_w - total_w) / 2;
+    int btn_y = LV_VER_RES - 36;
+
     if (s_inv_btn) { lv_obj_del(s_inv_btn); s_inv_btn = nullptr; }
     s_inv_btn = lv_btn_create(lv_scr_act());
-    lv_obj_set_size(s_inv_btn, 130, 32);
-    lv_obj_set_pos(s_inv_btn, col_x + (col_w - 130) / 2, LV_VER_RES - 36);
+    lv_obj_set_size(s_inv_btn, btn_w, 32);
+    lv_obj_set_pos(s_inv_btn, btn_x, btn_y);
     lv_obj_set_style_bg_color(s_inv_btn, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
     lv_obj_set_style_radius(s_inv_btn, 4, 0);
     lv_obj_set_style_shadow_width(s_inv_btn, 0, 0);
     lv_obj_t *inv_lbl = lv_label_create(s_inv_btn);
-    lv_label_set_text(inv_lbl, inv ? "Dark Mode" : "Light Mode");
+    lv_label_set_text(inv_lbl, inv ? "Dark" : "Light");
     lv_obj_set_style_text_color(inv_lbl, lv_color_hex(inv ? 0x333333 : 0xCCCCCC), 0);
     lv_obj_set_style_text_font(inv_lbl, &lv_font_montserrat_14, 0);
     lv_obj_center(inv_lbl);
     lv_obj_add_event_cb(s_inv_btn, [](lv_event_t *e) {
         lv_obj_del(lv_event_get_target(e));
         s_inv_btn = nullptr;
+        if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
         page_set_inverted(!page_is_inverted());
         lv_obj_set_style_bg_color(lv_scr_act(),
             lv_color_hex(page_is_inverted() ? 0xF0F0F0 : 0x1A1A2E), 0);
         show_boot_menu();
     }, LV_EVENT_CLICKED, nullptr);
 
+    // WiFi Setup button
+    if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
+    s_wifi_btn = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(s_wifi_btn, btn_w, 32);
+    lv_obj_set_pos(s_wifi_btn, btn_x + btn_w + btn_gap, btn_y);
+    lv_obj_set_style_bg_color(s_wifi_btn, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
+    lv_obj_set_style_radius(s_wifi_btn, 4, 0);
+    lv_obj_set_style_shadow_width(s_wifi_btn, 0, 0);
+    lv_obj_t *wifi_lbl = lv_label_create(s_wifi_btn);
+    lv_label_set_text(wifi_lbl, "WiFi");
+    lv_obj_set_style_text_color(wifi_lbl, lv_color_hex(inv ? 0x333333 : 0xCCCCCC), 0);
+    lv_obj_set_style_text_font(wifi_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_center(wifi_lbl);
+    lv_obj_add_event_cb(s_wifi_btn, wifi_setup_cb, LV_EVENT_CLICKED, nullptr);
+
     header_set_url("");
     lvgl_unlock();
+}
+
+bool boot_menu_portal_check() {
+    if (s_portal_done) {
+        s_portal_done = false;
+        show_boot_menu();
+        return true;
+    }
+    return false;
 }
