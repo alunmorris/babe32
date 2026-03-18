@@ -46,6 +46,7 @@ static ParseResult      *s_pending_result = nullptr;
 static TaskHandle_t      s_ui_task_handle = nullptr;
 static bool              s_loading       = false;
 static bool              s_stop_rendered = false; // true after Stop rendered partial page
+static lv_obj_t         *s_wifi_banner  = nullptr; // "WiFi disconnected" overlay
 static char              s_pending_url[512] = "";
 volatile int             g_fetch_kb = 0;
 
@@ -703,6 +704,52 @@ static void ui_task_fn(void *arg) {
                     lvgl_unlock();
                 } else if (res.data) {
                     heap_caps_free(res.data);
+                }
+            }
+        }
+
+        // WiFi connection monitor — check every 2 seconds
+        {
+            static uint32_t last_wifi_check = 0;
+            static bool was_disconnected = false;
+            if (millis() - last_wifi_check > 2000) {
+                last_wifi_check = millis();
+                bool connected = (WiFi.status() == WL_CONNECTED);
+                if (!connected && !was_disconnected) {
+                    // Just lost connection — show banner
+                    was_disconnected = true;
+                    if (lvgl_lock(50)) {
+                        if (!s_wifi_banner) {
+                            s_wifi_banner = lv_label_create(lv_scr_act());
+                            lv_obj_set_width(s_wifi_banner, LV_HOR_RES);
+                            lv_obj_set_style_bg_opa(s_wifi_banner, LV_OPA_COVER, 0);
+                            lv_obj_set_style_bg_color(s_wifi_banner, lv_color_hex(0xCC0000), 0);
+                            lv_obj_set_style_text_color(s_wifi_banner, lv_color_hex(0xFFFFFF), 0);
+                            lv_obj_set_style_text_font(s_wifi_banner, &lv_font_montserrat_14, 0);
+                            lv_obj_set_style_text_align(s_wifi_banner, LV_TEXT_ALIGN_CENTER, 0);
+                            lv_obj_set_style_pad_all(s_wifi_banner, 4, 0);
+                            lv_obj_add_flag(s_wifi_banner, LV_OBJ_FLAG_FLOATING);
+                            lv_obj_align(s_wifi_banner, LV_ALIGN_BOTTOM_MID, 0, 0);
+                        }
+                        lv_label_set_text(s_wifi_banner, "WiFi disconnected - reconnecting...");
+                        lv_obj_clear_flag(s_wifi_banner, LV_OBJ_FLAG_HIDDEN);
+                        lv_obj_move_foreground(s_wifi_banner);
+                        lvgl_unlock();
+                    }
+                    dbg("WiFi lost, attempting reconnect...");
+                    WiFi.reconnect();
+                } else if (!connected && was_disconnected) {
+                    // Still disconnected — keep trying
+                    WiFi.reconnect();
+                } else if (connected && was_disconnected) {
+                    // Just reconnected — hide banner
+                    was_disconnected = false;
+                    dbg("WiFi reconnected: %s", WiFi.localIP().toString().c_str());
+                    if (lvgl_lock(50)) {
+                        if (s_wifi_banner)
+                            lv_obj_add_flag(s_wifi_banner, LV_OBJ_FLAG_HIDDEN);
+                        lvgl_unlock();
+                    }
                 }
             }
         }
