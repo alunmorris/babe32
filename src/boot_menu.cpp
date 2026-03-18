@@ -18,6 +18,7 @@ static navigate_cb_t     s_nav_cb     = nullptr;
 static field_focus_cb_t  s_focus_cb   = nullptr;
 static urls_mode_cb_t    s_urls_cb    = nullptr;
 static lv_obj_t         *s_wiki_ta    = nullptr;
+static lv_obj_t         *s_inv_btn   = nullptr;
 
 struct MenuItem { const char *label; const char *url; };
 static const MenuItem s_menu[] = {
@@ -41,9 +42,14 @@ lv_obj_t *boot_menu_get_wiki_ta() {
     return s_wiki_ta;
 }
 
+static void hide_inv_btn() {
+    if (s_inv_btn) { lv_obj_del(s_inv_btn); s_inv_btn = nullptr; }
+}
+
 static void menu_item_cb(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     if (idx >= 0 && idx < s_menu_count) {
+        hide_inv_btn();
         const char *label = s_menu[idx].label;
         if (strcmp(label, "Search") == 0 || strcmp(label, "Wikipedia") == 0)
             if (s_urls_cb) s_urls_cb();
@@ -189,19 +195,21 @@ void show_boot_menu() {
     }
 
     // Light/Dark mode toggle button
-    lv_obj_t *inv_btn = lv_btn_create(lv_scr_act());
-    lv_obj_set_size(inv_btn, 130, 32);
-    lv_obj_set_pos(inv_btn, col_x + (col_w - 130) / 2, LV_VER_RES - 36);
-    lv_obj_set_style_bg_color(inv_btn, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
-    lv_obj_set_style_radius(inv_btn, 4, 0);
-    lv_obj_set_style_shadow_width(inv_btn, 0, 0);
-    lv_obj_t *inv_lbl = lv_label_create(inv_btn);
+    if (s_inv_btn) { lv_obj_del(s_inv_btn); s_inv_btn = nullptr; }
+    s_inv_btn = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(s_inv_btn, 130, 32);
+    lv_obj_set_pos(s_inv_btn, col_x + (col_w - 130) / 2, LV_VER_RES - 36);
+    lv_obj_set_style_bg_color(s_inv_btn, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
+    lv_obj_set_style_radius(s_inv_btn, 4, 0);
+    lv_obj_set_style_shadow_width(s_inv_btn, 0, 0);
+    lv_obj_t *inv_lbl = lv_label_create(s_inv_btn);
     lv_label_set_text(inv_lbl, inv ? "Dark Mode" : "Light Mode");
     lv_obj_set_style_text_color(inv_lbl, lv_color_hex(inv ? 0x333333 : 0xCCCCCC), 0);
     lv_obj_set_style_text_font(inv_lbl, &lv_font_montserrat_14, 0);
     lv_obj_center(inv_lbl);
-    lv_obj_add_event_cb(inv_btn, [](lv_event_t *e) {
+    lv_obj_add_event_cb(s_inv_btn, [](lv_event_t *e) {
         lv_obj_del(lv_event_get_target(e));
+        s_inv_btn = nullptr;
         page_set_inverted(!page_is_inverted());
         lv_obj_set_style_bg_color(lv_scr_act(),
             lv_color_hex(page_is_inverted() ? 0xF0F0F0 : 0x1A1A2E), 0);

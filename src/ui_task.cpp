@@ -316,6 +316,18 @@ static void url_toggle_cb(lv_event_t *e) {
         lv_coord_t sy = lv_obj_get_scroll_y(s_content);
         page_render(s_content, s_cur_result, on_link_tap,
                     on_form_submit, on_field_focus, s_show_links, s_show_images);
+        if (s_show_images) {
+            img_task_flush();
+            int img_idx;
+            const char *img_url;
+            while (page_img_next(&img_idx, &img_url)) {
+                ImgRequest req = {};
+                req.index = img_idx;
+                strncpy(req.url, img_url, sizeof(req.url) - 1);
+                req.full_size = false;
+                img_task_post(&req);
+            }
+        }
         lv_obj_update_layout(s_content);
         lv_obj_scroll_to_y(s_content, sy, LV_ANIM_OFF);
     }
