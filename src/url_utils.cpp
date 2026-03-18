@@ -56,3 +56,23 @@ char *url_resolve(const char *base, const char *href, char *out, size_t out_len)
     snprintf(out, out_len, "%s%s", base, href);
     return out;
 }
+
+size_t url_encode(const char *src, char *out, size_t out_len) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t w = 0;
+    for (; *src && w < out_len - 3; src++) {
+        char c = *src;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            out[w++] = c;
+        } else if (c == ' ') {
+            out[w++] = '+';
+        } else {
+            out[w++] = '%';
+            out[w++] = hex[(uint8_t)c >> 4];
+            out[w++] = hex[(uint8_t)c & 0x0F];
+        }
+    }
+    out[w] = '\0';
+    return w;
+}

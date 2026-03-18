@@ -1,27 +1,13 @@
 // 160326 Image fetcher via resize proxy
 #include "image_fetch.h"
 #include "fetcher.h"
+#include "url_utils.h"
 #include "dbglog.h"
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <esp_heap_caps.h>
 
 static WiFiClientSecure *s_img_client = nullptr;
-
-// URL-encode a string into out buffer
-static size_t url_encode(const char *src, char *out, size_t out_sz) {
-    size_t j = 0;
-    for (size_t i = 0; src[i] && j < out_sz - 4; i++) {
-        char c = src[i];
-        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            out[j++] = c;
-        } else {
-            j += snprintf(out + j, out_sz - j, "%%%02X", (uint8_t)c);
-        }
-    }
-    out[j] = '\0';
-    return j;
-}
 
 static bool ensure_connected() {
     // Always free main fetcher's TLS to reclaim internal RAM for image SSL

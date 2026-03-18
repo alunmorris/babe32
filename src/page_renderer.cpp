@@ -3,6 +3,7 @@
 // 160326 Add inline image rendering via proxy
 #include "page_renderer.h"
 #include "image_fetch.h"
+#include "url_utils.h"
 #include <Arduino.h>
 #include <string.h>
 #include <esp_heap_caps.h>
@@ -111,27 +112,6 @@ static void link_event_cb(lv_event_t *e) {
 
 static void form_ta_click_cb(lv_event_t *e) {
     if (s_focus_cb) s_focus_cb(lv_event_get_target(e));
-}
-
-// URL-encode src into out. Returns bytes written (excluding null).
-static size_t url_encode(const char *src, char *out, size_t out_len) {
-    static const char hex[] = "0123456789ABCDEF";
-    size_t w = 0;
-    for (; *src && w < out_len - 3; src++) {
-        char c = *src;
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
-            out[w++] = c;
-        } else if (c == ' ') {
-            out[w++] = '+';
-        } else {
-            out[w++] = '%';
-            out[w++] = hex[(uint8_t)c >> 4];
-            out[w++] = hex[(uint8_t)c & 0x0F];
-        }
-    }
-    out[w] = '\0';
-    return w;
 }
 
 // Collect form data from container's textareas/dropdowns + hidden fields

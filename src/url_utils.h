@@ -10,3 +10,6 @@ char *url_resolve(const char *base_url, const char *href,
 // Update the base URL from a newly navigated URL (extracts scheme+host+dir)
 void url_set_base(const char *navigated_url);
 const char *url_get_base();
+
+// URL-encode src into out buffer. Returns bytes written (excluding null).
+size_t url_encode(const char *src, char *out, size_t out_len);
