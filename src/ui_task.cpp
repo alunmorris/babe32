@@ -12,10 +12,10 @@
 #include "gesture.h"
 #include "history.h"
 #include "net_task.h"
+#include "ui_buttons.h"
 #include "dbglog.h"
 #include "display.h"
 #include "touch.h"
-#include "dbglog.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <lvgl.h>
@@ -357,20 +357,7 @@ static void load_url(const char *url) {
         }
         lv_obj_add_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
         page_show_spinner(s_content);
-        // Add Stop button below spinner
-        lv_obj_t *stop = lv_label_create(s_content);
-        lv_label_set_text(stop, "Stop");
-        lv_obj_set_size(stop, 80, 32);
-        lv_obj_set_style_bg_opa(stop, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(stop, lv_color_hex(0x0F3460), 0);
-        lv_obj_set_style_text_color(stop, lv_color_hex(0x4FC3F7), 0);
-        lv_obj_set_style_text_align(stop, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_pad_top(stop, 8, 0);
-        lv_obj_set_style_radius(stop, 0, 0);
-        lv_obj_set_style_shadow_width(stop, 0, 0);
-        lv_obj_set_style_border_width(stop, 0, 0);
-        lv_obj_add_flag(stop, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(stop, stop_btn_cb, LV_EVENT_CLICKED, NULL);
+        create_flat_btn(s_content, "Stop", 80, 32, stop_btn_cb, NULL);
         header_set_loading(true);
         lvgl_unlock();
     }
@@ -408,19 +395,7 @@ static void on_form_submit(const char *action_url, bool is_post,
         update_nav_buttons();
         if (lvgl_lock(50)) {
             page_show_spinner(s_content);
-            lv_obj_t *stop = lv_label_create(s_content);
-            lv_label_set_text(stop, "Stop");
-            lv_obj_set_size(stop, 80, 32);
-            lv_obj_set_style_bg_opa(stop, LV_OPA_COVER, 0);
-            lv_obj_set_style_bg_color(stop, lv_color_hex(0x0F3460), 0);
-            lv_obj_set_style_text_color(stop, lv_color_hex(0x4FC3F7), 0);
-            lv_obj_set_style_text_align(stop, LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_set_style_pad_top(stop, 8, 0);
-            lv_obj_set_style_radius(stop, 0, 0);
-            lv_obj_set_style_shadow_width(stop, 0, 0);
-            lv_obj_set_style_border_width(stop, 0, 0);
-            lv_obj_add_flag(stop, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_add_event_cb(stop, stop_btn_cb, LV_EVENT_CLICKED, NULL);
+            create_flat_btn(s_content, "Stop", 80, 32, stop_btn_cb, NULL);
             header_set_loading(true);
             lvgl_unlock();
         }
@@ -835,20 +810,11 @@ static void ui_task_fn(void *arg) {
                         lv_obj_set_style_text_color(dbg_lbl, lv_color_hex(inv ? 0x888888 : 0x666666), 0);
                         lv_obj_set_style_text_font(dbg_lbl, &lv_font_montserrat_14, 0);
                     }
-                    // Retry button (flat label, clickable)
-                    lv_obj_t *btn = lv_label_create(s_content);
-                    lv_label_set_text(btn, "Retry");
-                    lv_obj_set_size(btn, 80, 32);
-                    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-                    lv_obj_set_style_bg_color(btn, lv_color_hex(inv ? 0xE0E0E0 : 0x0F3460), 0);
-                    lv_obj_set_style_text_color(btn, lv_color_hex(inv ? 0x0066CC : 0x4FC3F7), 0);
-                    lv_obj_set_style_text_align(btn, LV_TEXT_ALIGN_CENTER, 0);
-                    lv_obj_set_style_pad_top(btn, 8, 0);
-                    lv_obj_set_style_radius(btn, 0, 0);
-                    lv_obj_set_style_shadow_width(btn, 0, 0);
-                    lv_obj_set_style_border_width(btn, 0, 0);
-                    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-                    lv_obj_add_event_cb(btn, retry_btn_cb, LV_EVENT_CLICKED, NULL);
+                    lv_obj_t *btn = create_flat_btn(s_content, "Retry", 80, 32, retry_btn_cb, NULL);
+                    if (inv) {
+                        lv_obj_set_style_bg_color(btn, lv_color_hex(0xE0E0E0), 0);
+                        lv_obj_set_style_text_color(btn, lv_color_hex(0x0066CC), 0);
+                    }
                 }
                 // AI chat mode: hide header, use full height, scroll to bottom
                 bool is_aichat = strstr(s_pending_url, AICHAT_URL) != nullptr;
