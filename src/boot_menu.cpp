@@ -210,7 +210,7 @@ void show_boot_menu() {
     lv_obj_set_width(title, col_w);
     lv_obj_set_style_text_color(title,
         lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_bottom(title, 12, 0);
     lv_obj_add_flag(title, LV_OBJ_FLAG_FLOATING);
