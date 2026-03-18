@@ -8,7 +8,7 @@
 #include "ui_header.h"
 #include "page_renderer.h"
 #include "boot_menu.h"
-#include "image_fetch.h"
+#include "img_task.h"
 #include "fetcher.h"
 #include "gesture.h"
 #include "history.h"
@@ -116,6 +116,7 @@ static void load_url(const char *url) {
     g_fetch_kb = 0;
     s_loading = true;
     s_stop_rendered = false;
+    img_task_flush();
     net_task_load(url);
 }
 
@@ -330,6 +331,20 @@ static void img_toggle_cb(lv_event_t *e) {
         lv_coord_t sy = lv_obj_get_scroll_y(s_content);
         page_render(s_content, s_cur_result, on_link_tap,
                     on_form_submit, on_field_focus, s_show_links, s_show_images);
+        if (s_show_images) {
+            img_task_flush();
+            int img_idx;
+            const char *img_url;
+            while (page_img_next(&img_idx, &img_url)) {
+                ImgRequest req = {};
+                req.index = img_idx;
+                strncpy(req.url, img_url, sizeof(req.url) - 1);
+                req.full_size = false;
+                img_task_post(&req);
+            }
+        } else {
+            img_task_flush();
+        }
         lv_obj_update_layout(s_content);
         lv_obj_scroll_to_y(s_content, sy, LV_ANIM_OFF);
     }
@@ -502,6 +517,7 @@ static void ui_task_fn(void *arg) {
     }
 
     net_task_start(on_page_ready);
+    img_task_start();
 
     // Wait for WiFi before loading homepage
     while (WiFi.status() != WL_CONNECTED) {
@@ -536,6 +552,18 @@ static void ui_task_fn(void *arg) {
                 if (result && result->count > 0 && !result->error) {
                     page_render(s_content, result, on_link_tap,
                                on_form_submit, on_field_focus, s_show_links, s_show_images);
+                    // Queue pending images for background fetch
+                    if (s_show_images) {
+                        int img_idx;
+                        const char *img_url;
+                        while (page_img_next(&img_idx, &img_url)) {
+                            ImgRequest req = {};
+                            req.index = img_idx;
+                            strncpy(req.url, img_url, sizeof(req.url) - 1);
+                            req.full_size = false;
+                            img_task_post(&req);
+                        }
+                    }
                 } else {
                     page_clear(s_content);
                     lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
@@ -630,36 +658,39 @@ static void ui_task_fn(void *arg) {
             lvgl_unlock();
         }
 
-        // Full-size image fetch (outside LVGL lock, highest priority)
+        // Full-size image request — post to background task
         {
             const char *full_url;
             if (page_img_full_pending(&full_url)) {
-                size_t len = 0;
-                uint8_t *data = image_fetch_full(full_url, &len);
-                if (lvgl_lock(50)) {
-                    if (data && len > 0)
-                        page_img_full_set(data, len);
-                    else
-                        page_img_full_fail();
-                    lvgl_unlock();
-                } else if (data) {
-                    heap_caps_free(data);
-                }
+                ImgRequest req = {};
+                req.index = -1;
+                strncpy(req.url, full_url, sizeof(req.url) - 1);
+                req.full_size = true;
+                img_task_post(&req);
             }
         }
 
-        // Fetch one pending thumbnail per loop (outside LVGL lock)
-        if (!s_loading && s_show_images) {
-            int img_idx;
-            const char *img_url;
-            if (page_img_next(&img_idx, &img_url)) {
-                size_t len = 0;
-                uint8_t *data = image_fetch(img_url, &len);
-                if (data && len > 0 && lvgl_lock(50)) {
-                    page_img_set(img_idx, data, len);
+        // Check for completed image fetches (non-blocking)
+        {
+            ImgResult res;
+            while (img_task_poll(&res)) {
+                if (lvgl_lock(50)) {
+                    if (res.full_size) {
+                        if (res.data && res.len > 0)
+                            page_img_full_set(res.data, res.len);
+                        else {
+                            if (res.data) heap_caps_free(res.data);
+                            page_img_full_fail();
+                        }
+                    } else {
+                        if (res.data && res.len > 0)
+                            page_img_set(res.index, res.data, res.len);
+                        else if (res.data)
+                            heap_caps_free(res.data);
+                    }
                     lvgl_unlock();
-                } else if (data) {
-                    heap_caps_free(data);
+                } else if (res.data) {
+                    heap_caps_free(res.data);
                 }
             }
         }
