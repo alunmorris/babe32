@@ -189,6 +189,8 @@ void show_boot_menu() {
     lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_bg_color(s_content, bg, 0);
+    lv_obj_set_style_pad_all(s_content, 0, 0);
+    lv_obj_set_style_pad_gap(s_content, 0, 0);
     lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
 
     // Image — bottom-left
