@@ -234,6 +234,7 @@ static void stop_btn_cb(lv_event_t *e) {
 
 static void retry_current() {
     const char *url = header_get_url_text();
+    if (!url || !url[0]) url = s_pending_url;  // fallback for pages with hidden header
     if (url && url[0]) load_url(url);
 }
 
