@@ -56,6 +56,42 @@ static uint32_t parse_css_color(const char *s) {
     return 0;
 }
 
+// Snap a pixel value to nearest available Montserrat size
+static uint8_t snap_font_size(int px) {
+    if (px < 15) return 14;
+    if (px < 17) return 16;
+    if (px < 19) return 18;
+    if (px < 22) return 20;
+    return 24;
+}
+
+// Extract font-size from style attribute. Returns snapped size or 0 if not found.
+static uint8_t parse_style_font_size(const char *tag_str) {
+    if (!tag_str) return 0;
+    const char *p = strcasestr(tag_str, "font-size:");
+    if (!p) return 0;
+    p += 10;
+    while (*p == ' ') p++;
+    // Keywords (longest first to avoid prefix matches)
+    if (strncasecmp(p, "xx-large", 8) == 0) return 24;
+    if (strncasecmp(p, "x-large",  7) == 0) return 20;
+    if (strncasecmp(p, "xx-small", 8) == 0) return 14;
+    if (strncasecmp(p, "x-small",  7) == 0) return 14;
+    if (strncasecmp(p, "larger",   6) == 0) return 18;
+    if (strncasecmp(p, "smaller",  7) == 0) return 14;
+    if (strncasecmp(p, "large",    5) == 0) return 18;
+    if (strncasecmp(p, "medium",   6) == 0) return 16;
+    if (strncasecmp(p, "small",    5) == 0) return 14;
+    // Numeric
+    char *end;
+    float val = strtof(p, &end);
+    if (end == p || val <= 0) return 0;
+    while (*end == ' ') end++;
+    if (strncasecmp(end, "em", 2) == 0 || strncasecmp(end, "rem", 3) == 0 || *end == '%')
+        return 0;  // relative units — skip
+    return snap_font_size((int)(val + 0.5f));
+}
+
 // Extract color from style attribute, e.g. style="color:blue"
 static uint32_t parse_style_color(const char *tag_str) {
     char style[256] = "";
@@ -103,7 +139,8 @@ static uint32_t parse_style_color(const char *tag_str) {
 static bool add_elem(ParseResult *r, ElemType type, const char *text,
                      size_t text_len, const char *href, uint8_t level,
                      bool bold = false, uint32_t color = 0,
-                     bool italic = false, bool monospace = false) {
+                     bool italic = false, bool monospace = false,
+                     uint8_t font_size = 0) {
     if (r->count >= MAX_ELEMENTS) return false;
     if (type != ELEM_LINEBREAK && text_len == 0) return true;
     PageElement *e = &r->elems[r->count];
@@ -114,6 +151,7 @@ static bool add_elem(ParseResult *r, ElemType type, const char *text,
     e->italic    = italic;
     e->monospace = monospace;
     e->color     = color;
+    e->font_size = font_size;
     e->text  = pool_add(r, text, text_len);
     if (type == ELEM_LINK && href)
         e->href = pool_add(r, href, strlen(href));
@@ -278,9 +316,12 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
     bool     acc_all_italic = true;
     bool     in_mono = false;
     bool     acc_all_mono = true;
-    uint32_t cur_color = 0;        // current inline color (0 = default)
-    uint32_t acc_color = 0;        // color seen during accumulation
-    int      color_depth = 0;      // nesting depth of color-setting tags
+    uint32_t cur_color     = 0;    // current inline color (0 = default)
+    uint32_t acc_color     = 0;    // color seen during accumulation
+    int      color_depth   = 0;    // nesting depth of color-setting tags
+    uint8_t  cur_font_size = 0;    // current inline font size (0 = default)
+    uint8_t  acc_font_size = 0;    // font size seen during accumulation
+    int      font_size_depth = 0;  // nesting depth of font-size-setting tags
     // List state — stack for nested lists
     #define MAX_LIST_DEPTH 4
     struct { bool ordered; int counter; } list_stack[MAX_LIST_DEPTH];
@@ -303,7 +344,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                          text_acc + start, len,
                          in_link ? link_href : NULL,
                          cur_level, acc_all_bold, acc_color,
-                         acc_all_italic, acc_all_mono);
+                         acc_all_italic, acc_all_mono, acc_font_size);
             }
             acc_len = 0;
             acc_prefix_len = 0;
@@ -311,6 +352,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
             acc_all_italic = true;
             acc_all_mono = true;
             acc_color = cur_color;
+            acc_font_size = cur_font_size;
         }
     };
 
@@ -357,6 +399,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                     if (!in_italic) acc_all_italic = false;
                     if (!in_mono) acc_all_mono = false;
                             if (cur_color) acc_color = cur_color;
+                            if (cur_font_size) acc_font_size = cur_font_size;
                         }
                     }
                     continue;
@@ -370,6 +413,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                     if (!in_italic) acc_all_italic = false;
                     if (!in_mono) acc_all_mono = false;
                     if (cur_color) acc_color = cur_color;
+                    if (cur_font_size) acc_font_size = cur_font_size;
                 }
             }
             p++;
@@ -445,9 +489,17 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 cur_type = ELEM_PARAGRAPH; cur_level = 0;
                 uint32_t c = parse_style_color(tag_str);
                 if (c) { cur_color = c; color_depth++; }
-            } else if (color_depth > 0) {
-                color_depth--;
-                if (color_depth == 0) { cur_color = 0; acc_color = 0; }
+                uint8_t fs = parse_style_font_size(tag_str);
+                if (fs) { cur_font_size = fs; font_size_depth++; }
+            } else {
+                if (color_depth > 0) {
+                    color_depth--;
+                    if (color_depth == 0) { cur_color = 0; acc_color = 0; }
+                }
+                if (font_size_depth > 0) {
+                    font_size_depth--;
+                    if (font_size_depth == 0) { cur_font_size = 0; acc_font_size = 0; }
+                }
             }
         }
         // Line break
@@ -537,7 +589,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 text_acc[acc_len++] = '"';
         }
 
-        // Inline color: <span style="color:...">, <font color="...">
+        // Inline color/size: <span style="...">, <font color="..." size="...">
         else if (tag_is(name, name_len, "span") ||
                  tag_is(name, name_len, "font")) {
             if (!closing) {
@@ -548,13 +600,29 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                     if (get_attr(tag_str, "color", cval, sizeof(cval)))
                         c = parse_css_color(cval);
                 }
-                if (c) {
-                    cur_color = c;
-                    color_depth++;
+                if (c) { cur_color = c; color_depth++; }
+                uint8_t fs = parse_style_font_size(tag_str);
+                // Also try <font size="1-7">
+                if (!fs && tag_is(name, name_len, "font")) {
+                    char sval[8] = "";
+                    if (get_attr(tag_str, "size", sval, sizeof(sval))) {
+                        int n = atoi(sval);
+                        if (n >= 1 && n <= 7) {
+                            static const uint8_t html_sizes[7] = {14,14,16,18,20,20,24};
+                            fs = html_sizes[n - 1];
+                        }
+                    }
                 }
-            } else if (color_depth > 0) {
-                color_depth--;
-                if (color_depth == 0) { cur_color = 0; acc_color = 0; }
+                if (fs) { cur_font_size = fs; font_size_depth++; }
+            } else {
+                if (color_depth > 0) {
+                    color_depth--;
+                    if (color_depth == 0) { cur_color = 0; acc_color = 0; }
+                }
+                if (font_size_depth > 0) {
+                    font_size_depth--;
+                    if (font_size_depth == 0) { cur_font_size = 0; acc_font_size = 0; }
+                }
             }
         }
         // Image (self-closing)
@@ -883,9 +951,17 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 if (!closing) {
                     uint32_t c = parse_style_color(tag_str);
                     if (c) { cur_color = c; color_depth++; }
-                } else if (color_depth > 0) {
-                    color_depth--;
-                    if (color_depth == 0) { cur_color = 0; acc_color = 0; }
+                    uint8_t fs = parse_style_font_size(tag_str);
+                    if (fs) { cur_font_size = fs; font_size_depth++; }
+                } else {
+                    if (color_depth > 0) {
+                        color_depth--;
+                        if (color_depth == 0) { cur_color = 0; acc_color = 0; }
+                    }
+                    if (font_size_depth > 0) {
+                        font_size_depth--;
+                        if (font_size_depth == 0) { cur_font_size = 0; acc_font_size = 0; }
+                    }
                 }
             }
         }

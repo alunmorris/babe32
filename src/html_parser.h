@@ -30,6 +30,7 @@ typedef struct {
     bool     italic;    // true if inside <em>/<i>/<dfn>
     bool     monospace; // true if inside <code>/<kbd>/<samp>
     uint32_t color;     // 0 = default, else 0xRRGGBB | 0x01000000 flag
+    uint8_t  font_size; // 0 = default, else snapped to 14/16/18/20/24
 } PageElement;
 
 #define MAX_ELEMENTS 1024

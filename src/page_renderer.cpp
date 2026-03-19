@@ -27,6 +27,14 @@ bool page_is_inverted() { return s_inverted; }
 LV_FONT_DECLARE(lv_font_montserrat_bold_14);
 LV_FONT_DECLARE(lv_font_dejavu_mono_14);
 
+static const lv_font_t *font_for_size(uint8_t sz) {
+    if (sz >= 22) return &lv_font_montserrat_24;
+    if (sz >= 19) return &lv_font_montserrat_20;
+    if (sz >= 17) return &lv_font_montserrat_18;
+    if (sz >= 15) return &lv_font_montserrat_16;
+    return &lv_font_montserrat_14;
+}
+
 static link_tap_cb_t        s_link_cb       = nullptr;
 static form_submit_cb_t     s_submit_cb     = nullptr;
 static form_field_focus_cb_t s_focus_cb     = nullptr;
@@ -313,8 +321,9 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_color_t tc = e->color ? lv_color_hex(e->color & 0x00FFFFFF)
                               : e->italic ? COLOUR_ITALIC : COLOUR_TEXT;
                 lv_obj_set_style_text_color(lbl, tc, 0);
-                const lv_font_t *f = e->monospace ? &lv_font_dejavu_mono_14
-                                   : e->bold     ? &lv_font_montserrat_bold_14
+                const lv_font_t *f = e->monospace  ? &lv_font_dejavu_mono_14
+                                   : e->font_size ? font_for_size(e->font_size)
+                                   : e->bold      ? &lv_font_montserrat_bold_14
                                                   : &lv_font_montserrat_14;
                 lv_obj_set_style_text_font(lbl, f, 0);
                 break;
@@ -327,8 +336,9 @@ void page_render(lv_obj_t *container, const ParseResult *result,
                 lv_color_t tc = e->color ? lv_color_hex(e->color & 0x00FFFFFF)
                               : COLOUR_LINK;
                 lv_obj_set_style_text_color(lbl, tc, 0);
-                const lv_font_t *f = e->monospace ? &lv_font_dejavu_mono_14
-                                   : e->bold     ? &lv_font_montserrat_bold_14
+                const lv_font_t *f = e->monospace  ? &lv_font_dejavu_mono_14
+                                   : e->font_size  ? font_for_size(e->font_size)
+                                   : e->bold       ? &lv_font_montserrat_bold_14
                                                   : &lv_font_montserrat_14;
                 lv_obj_set_style_text_font(lbl, f, 0);
                 lv_obj_add_flag(lbl, LV_OBJ_FLAG_CLICKABLE);
