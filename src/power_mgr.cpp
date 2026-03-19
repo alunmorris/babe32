@@ -79,6 +79,7 @@ void power_mgr_tick() {
             // Both cores halted during sleep; I2C/LEDC state preserved on wake
             if (axs_poll_touch()) {
                 display_backlight_set(100);
+                touch_suppress_next();  // don't action the wake tap
                 s_last_touch_ms = millis();
                 s_state = ACTIVE;
                 return;

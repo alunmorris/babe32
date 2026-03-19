@@ -13,7 +13,8 @@
 
 static lv_indev_drv_t indev_drv;
 static bool s_touch_ok = false;
-static volatile bool s_touch_active = false;
+static volatile bool s_touch_active   = false;
+static volatile bool s_suppress_touch = false;
 
 volatile int g_touch_x = -1, g_touch_y = -1;
 volatile bool g_touch_pressed = false;
@@ -44,6 +45,12 @@ static uint32_t s_touch_dbg_count = 0;
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
     uint16_t tx, ty;
     if (s_touch_ok && axs_read(&tx, &ty)) {
+        if (s_suppress_touch) {
+            // Wake-from-sleep touch — report released until finger lifts
+            data->state = LV_INDEV_STATE_REL;
+            g_touch_pressed = false;
+            return;
+        }
         // Transform portrait touch → landscape (CW 90°)
         data->point.x = ty;           // landscape x = portrait y
         data->point.y = 319 - tx;     // landscape y = 319 - portrait x
@@ -58,6 +65,7 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
             s_touch_dbg_count++;
         }
     } else {
+        s_suppress_touch = false;   // finger lifted — end suppression
         data->state = LV_INDEV_STATE_REL;
         g_touch_pressed = false;
     }
@@ -93,4 +101,8 @@ bool touch_was_active() {
     if (!s_touch_active) return false;
     s_touch_active = false;
     return true;
+}
+
+void touch_suppress_next() {
+    s_suppress_touch = true;
 }
