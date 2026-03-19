@@ -447,7 +447,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 if (c) { cur_color = c; color_depth++; }
             } else if (color_depth > 0) {
                 color_depth--;
-                if (color_depth == 0) cur_color = 0;
+                if (color_depth == 0) { cur_color = 0; acc_color = 0; }
             }
         }
         // Line break
@@ -554,7 +554,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                 }
             } else if (color_depth > 0) {
                 color_depth--;
-                if (color_depth == 0) cur_color = 0;
+                if (color_depth == 0) { cur_color = 0; acc_color = 0; }
             }
         }
         // Image (self-closing)
@@ -885,7 +885,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                     if (c) { cur_color = c; color_depth++; }
                 } else if (color_depth > 0) {
                     color_depth--;
-                    if (color_depth == 0) cur_color = 0;
+                    if (color_depth == 0) { cur_color = 0; acc_color = 0; }
                 }
             }
         }
