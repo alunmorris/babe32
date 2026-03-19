@@ -4,3 +4,5 @@
 
 void touch_init();
 void touch_lvgl_init();
+// Returns true (and clears the flag) if touch occurred since last call.
+bool touch_was_active();

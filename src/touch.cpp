@@ -13,6 +13,7 @@
 
 static lv_indev_drv_t indev_drv;
 static bool s_touch_ok = false;
+static volatile bool s_touch_active = false;
 
 volatile int g_touch_x = -1, g_touch_y = -1;
 volatile bool g_touch_pressed = false;
@@ -50,6 +51,7 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data) {
         g_touch_x = data->point.x;
         g_touch_y = data->point.y;
         g_touch_pressed = true;
+        s_touch_active = true;
         if (s_touch_dbg_count < 5) {
             dbg("TOUCH: raw(%d,%d) -> landscape(%d,%d)", tx, ty,
                 data->point.x, data->point.y);
@@ -85,4 +87,10 @@ void touch_lvgl_init() {
     indev_drv.read_cb = touch_read_cb;
     lv_indev_drv_register(&indev_drv);
     dbg("LVGL touch indev registered");
+}
+
+bool touch_was_active() {
+    if (!s_touch_active) return false;
+    s_touch_active = false;
+    return true;
 }

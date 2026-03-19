@@ -138,7 +138,7 @@ static void backlight_init() {
     ledc_channel_config(&bl_ch);
 }
 
-static void backlight_set(int percent) {
+void display_backlight_set(int percent) {
     uint32_t duty = (1023 * percent) / 100;
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
@@ -147,7 +147,7 @@ static void backlight_set(int percent) {
 void display_init() {
     s_flush_done = xSemaphoreCreateBinary();
     backlight_init();
-    backlight_set(100);  // on immediately — if screen stays dark, we're crashing below
+    display_backlight_set(100);  // on immediately — if screen stays dark, we're crashing below
 
     // Init SPI bus with QSPI pins (data0-3 + clock).
     // SPICOMMON_BUSFLAG_QUAD enables WP/HD pins as quad data lines.
@@ -190,7 +190,7 @@ void display_init() {
 
     esp_lcd_panel_disp_on_off(panel_handle, true);
 
-    backlight_set(100);
+    display_backlight_set(100);
     Serial.println("Display initialised (AXS15231B QSPI 320x480 portrait)");
 }
 

@@ -17,6 +17,7 @@
 #include "dbglog.h"
 #include "display.h"
 #include "touch.h"
+#include "power_mgr.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <lvgl.h>
@@ -542,6 +543,9 @@ static void ui_task_fn(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     show_boot_menu();
+#ifdef BATTERY_MODE
+    power_mgr_init();
+#endif
 
     // LVGL tick loop
     for (;;) {
@@ -756,6 +760,10 @@ static void ui_task_fn(void *arg) {
                 }
             }
         }
+
+#ifdef BATTERY_MODE
+        power_mgr_tick();
+#endif
 
         vTaskDelay(pdMS_TO_TICKS(5));
     }

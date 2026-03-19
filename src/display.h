@@ -12,3 +12,5 @@ void display_lvgl_init();
 void display_test_quadrants();
 // Hardware test: cycles through solid R/G/B/W/Cyan/Magenta every 2 seconds.
 void display_test_solid_cycle();
+// Set backlight brightness 0-100%. Safe to call outside LVGL lock (LEDC, no LVGL).
+void display_backlight_set(int percent);
