@@ -27,3 +27,9 @@ const char *header_get_url_text();
 
 // Show/hide the header bar
 void header_set_visible(bool visible);
+
+// Update WiFi signal icon colour (rssi in dBm; pass -100 when disconnected)
+void header_set_wifi_rssi(int rssi);
+
+// Move WiFi icon to foreground — call once after all screen widgets are created
+void header_wifi_foreground();

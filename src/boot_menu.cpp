@@ -1,10 +1,11 @@
 // 180326 Boot menu and wiki search screens (extracted from ui_task.cpp)
+// 190326 Replace WiFiManager portal with self-contained wifi_setup flow
 #include "boot_menu.h"
+#include "wifi_setup.h"
 #include "page_renderer.h"
 #include "ui_header.h"
 #include "ui_buttons.h"
 #include "url_utils.h"
-#include "wifi_mgr.h"
 #include <Arduino.h>
 #include <string.h>
 #include <freertos/task.h>
@@ -22,8 +23,6 @@ static urls_mode_cb_t    s_urls_cb    = nullptr;
 static lv_obj_t         *s_wiki_ta    = nullptr;
 static lv_obj_t         *s_inv_btn   = nullptr;
 static lv_obj_t         *s_wifi_btn  = nullptr;
-static volatile bool     s_portal_active = false;
-static volatile bool     s_portal_done   = false;
 
 struct MenuItem { const char *label; const char *url; };
 static const MenuItem s_menu[] = {
@@ -119,6 +118,11 @@ void show_wiki_search() {
     lv_obj_set_style_radius(ta, 0, 0);
     lv_obj_set_style_shadow_width(ta, 0, 0);
     lv_obj_set_style_pad_all(ta, 4, 0);
+    lv_obj_set_style_bg_color(ta, lv_color_hex(0x4FC3F7), LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(ta, 0, LV_PART_CURSOR);
+    lv_obj_set_style_radius(ta, 0, LV_PART_CURSOR);
+    lv_obj_set_style_anim_time(ta, 0, LV_PART_CURSOR | LV_STATE_FOCUSED);
 
     // Search button
     lv_obj_t *btn = create_flat_btn(s_content, "Search", 80, 32,
@@ -137,39 +141,9 @@ void show_wiki_search() {
     lvgl_unlock();
 }
 
-static void wifi_portal_task(void *arg) {
-    wifi_mgr_start_portal();
-    s_portal_active = false;
-    s_portal_done = true;
-    vTaskDelete(nullptr);
-}
-
-static void wifi_setup_cb(lv_event_t *e) {
-    if (s_portal_active) return;
-    s_portal_active = true;
-    // Show message on screen
-    if (lvgl_lock(50)) {
-        hide_boot_buttons();
-        if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
-        page_clear(s_content);
-        lv_obj_set_flex_flow(s_content, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(s_content, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        bool inv = page_is_inverted();
-        lv_obj_t *lbl = lv_label_create(s_content);
-        lv_label_set_text(lbl, "WiFi Setup Active\n\n"
-            "Connect to AP:\n\"ESP32-Browser\"\n\n"
-            "Then open 192.168.4.1\nin your browser");
-        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(lbl, LV_PCT(80));
-        lv_obj_set_style_text_color(lbl, lv_color_hex(inv ? 0x000000 : 0xFFFFFF), 0);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
-        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
-        lvgl_unlock();
-    }
-    // Run portal on a separate task (it blocks)
-    xTaskCreatePinnedToCore(wifi_portal_task, "wifi_portal", 8192,
-                            nullptr, 2, nullptr, 0);
+static void wifi_setup_btn_cb(lv_event_t *e) {
+    hide_boot_buttons();
+    wifi_setup_show();
 }
 
 extern const lv_img_dsc_t babe32_img;
@@ -192,6 +166,9 @@ void show_boot_menu() {
     lv_obj_set_style_pad_all(s_content, 0, 0);
     lv_obj_set_style_pad_gap(s_content, 0, 0);
     lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Force layout so lv_obj_get_height reflects the height just set above
+    lv_obj_update_layout(s_content);
 
     // Image — bottom-left
     lv_obj_t *pig = lv_img_create(s_content);
@@ -217,7 +194,7 @@ void show_boot_menu() {
     lv_obj_set_style_pad_bottom(title, 12, 0);
     lv_obj_add_flag(title, LV_OBJ_FLAG_FLOATING);
     lv_obj_set_width(title, LV_HOR_RES);
-    lv_obj_set_pos(title, -5, 8);
+    lv_obj_set_pos(title, -3, 9);
 
     // Menu items
     int y_pos = 80;
@@ -279,17 +256,9 @@ void show_boot_menu() {
     lv_obj_set_style_text_color(wifi_lbl, lv_color_hex(inv ? 0x333333 : 0xCCCCCC), 0);
     lv_obj_set_style_text_font(wifi_lbl, &lv_font_montserrat_14, 0);
     lv_obj_center(wifi_lbl);
-    lv_obj_add_event_cb(s_wifi_btn, wifi_setup_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_wifi_btn, wifi_setup_btn_cb, LV_EVENT_CLICKED, nullptr);
 
     header_set_url("");
     lvgl_unlock();
 }
 
-bool boot_menu_portal_check() {
-    if (s_portal_done) {
-        s_portal_done = false;
-        show_boot_menu();
-        return true;
-    }
-    return false;
-}

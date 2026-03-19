@@ -10,5 +10,4 @@
 void wifi_mgr_init();            // load APs from NVS
 bool wifi_mgr_connect();         // scan + connect to first known AP
 void wifi_mgr_add_ap(const char *ssid, const char *pass); // save new AP
-void wifi_mgr_start_portal();    // launch captive portal (blocks until configured)
 bool wifi_mgr_is_connected();

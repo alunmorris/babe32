@@ -1,6 +1,7 @@
 // 060326 Browser entry point: WiFi first, then UI task
 // 110326 Force WiFi PHY init before display PSRAM DMA to avoid MMU fault
 // 120326 NTP time sync after WiFi connect
+// 190326 Remove portal fallback — WiFi setup handled by UI
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -25,8 +26,7 @@ void setup() {
 
     wifi_mgr_init();
     if (!wifi_mgr_connect()) {
-        Serial.println("No known AP — starting portal");
-        wifi_mgr_start_portal();  // blocks until configured; UI task runs independently
+        Serial.println("No known AP — use WiFi setup in the browser UI");
     }
 
     Serial.printf("WiFi: %s\n",

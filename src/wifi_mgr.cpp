@@ -1,9 +1,9 @@
 // 060326 NVS-backed multi-AP WiFi with scan-and-match
+// 190326 Remove WiFiManager portal (replaced by wifi_setup.cpp)
 #include "wifi_mgr.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <Preferences.h>
-#include <WiFiManager.h>
 
 static Preferences prefs;
 static char ssids[WIFI_MAX_APS][WIFI_SSID_LEN];
@@ -98,18 +98,6 @@ void wifi_mgr_add_ap(const char *ssid, const char *pass) {
     Serial.printf("WiFi: saved AP '%s' (total: %d)\n", ssid, ap_count);
 }
 
-void wifi_mgr_start_portal() {
-    Serial.println("WiFi: starting captive portal 'ESP32-Browser'");
-    WiFiManager wm;
-    wm.setSaveConfigCallback([]() {});
-    wm.setConfigPortalTimeout(0);
-    bool ok = wm.startConfigPortal("ESP32-Browser");
-    if (ok) {
-        wifi_mgr_add_ap(wm.getWiFiSSID().c_str(), wm.getWiFiPass().c_str());
-        Serial.printf("WiFi: portal configured SSID='%s'\n",
-                      wm.getWiFiSSID().c_str());
-    }
-}
 
 bool wifi_mgr_is_connected() {
     return WiFi.status() == WL_CONNECTED;

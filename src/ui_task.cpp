@@ -4,10 +4,12 @@
 // 120326 Add on-screen keyboard for URL entry
 // 130326 Reduce keyboard height for landscape layout
 // 160326 Add Stop button for partial page render, AI Chat home button, menu items
+// 190326 Integrate wifi_setup module; WiFi wait timeout; remove portal check
 #include "ui_task.h"
 #include "ui_header.h"
 #include "page_renderer.h"
 #include "boot_menu.h"
+#include "wifi_setup.h"
 #include "img_task.h"
 #include "fetcher.h"
 #include "gesture.h"
@@ -270,6 +272,10 @@ static void kb_event_cb(lv_event_t *e) {
             // Enter on wiki search — trigger search
             kb_hide();
             boot_menu_wiki_submit();
+        } else if (wifi_setup_get_pass_ta() && ta == wifi_setup_get_pass_ta()) {
+            // Enter on WiFi password — submit
+            kb_hide();
+            wifi_setup_kb_submit();
         } else {
             // Enter on form field — submit the form
             kb_hide();
@@ -392,6 +398,13 @@ static void kb_hide() {
     s_kb_visible = false;
 }
 
+// Called by wifi_setup on successful connect — reset DNS cache and return to boot menu
+static void on_wifi_setup_done() {
+    kb_hide();
+    fetch_disconnect();   // force re-resolve proxy DNS on the new network
+    show_boot_menu();
+}
+
 void ui_build_root() {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x1A1A2E), 0);
@@ -418,6 +431,7 @@ void ui_build_root() {
 
     gesture_attach(s_content, on_back, on_forward);
     boot_menu_init(s_content, do_navigate, on_field_focus, enable_urls_mode);
+    wifi_setup_init(s_content, on_wifi_setup_done, on_field_focus);
 
     // Keyboard — hidden by default, minimal flat styling
     s_kb = lv_keyboard_create(scr);
@@ -510,6 +524,9 @@ void ui_build_root() {
     // Tap URL bar to show keyboard
     lv_obj_add_event_cb(header_get_url_ta(), url_ta_click_cb, LV_EVENT_CLICKED, NULL);
 
+    // WiFi icon was created before s_content — bring it to front now
+    header_wifi_foreground();
+
     update_nav_buttons();
 }
 
@@ -534,14 +551,17 @@ static void ui_task_fn(void *arg) {
     net_task_start(on_page_ready);
     img_task_start();
 
-    // Wait for WiFi before loading homepage
-    while (WiFi.status() != WL_CONNECTED) {
-        if (lvgl_lock(5)) {
-            lv_obj_invalidate(lv_scr_act());
-            lv_timer_handler();
-            lvgl_unlock();
+    // Wait for WiFi (up to 15s) — proceed anyway so user can set up WiFi via UI
+    {
+        uint32_t t0 = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
+            if (lvgl_lock(5)) {
+                lv_obj_invalidate(lv_scr_act());
+                lv_timer_handler();
+                lvgl_unlock();
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
     }
     show_boot_menu();
 #ifdef BATTERY_MODE
@@ -713,19 +733,33 @@ static void ui_task_fn(void *arg) {
             }
         }
 
-        // Check if WiFi portal finished — return to boot menu
-        boot_menu_portal_check();
+        // WiFi signal strength icon — update every 5s
+        {
+            static uint32_t last_rssi_update = 0;
+            if (millis() - last_rssi_update > 1000) {
+                last_rssi_update = millis();
+                int rssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : -100;
+                if (lvgl_lock(50)) {
+                    header_set_wifi_rssi(rssi);
+                    lvgl_unlock();
+                }
+            }
+        }
 
-        // WiFi connection monitor — check every 2 seconds
+        // Drive WiFi setup state machine
+        wifi_setup_tick();
+
+        // WiFi connection monitor — skip while WiFi setup is running
         {
             static uint32_t last_wifi_check = 0;
             static bool was_disconnected = false;
-            if (millis() - last_wifi_check > 2000) {
+            if (!wifi_setup_active() && millis() - last_wifi_check > 2000) {
                 last_wifi_check = millis();
                 bool connected = (WiFi.status() == WL_CONNECTED);
                 if (!connected && !was_disconnected) {
-                    // Just lost connection — show banner
+                    // Just lost connection — show tap-to-retry banner, no auto-reconnect
                     was_disconnected = true;
+                    dbg("WiFi lost");
                     if (lvgl_lock(50)) {
                         if (!s_wifi_banner) {
                             s_wifi_banner = lv_label_create(lv_scr_act());
@@ -736,21 +770,20 @@ static void ui_task_fn(void *arg) {
                             lv_obj_set_style_text_font(s_wifi_banner, &lv_font_montserrat_14, 0);
                             lv_obj_set_style_text_align(s_wifi_banner, LV_TEXT_ALIGN_CENTER, 0);
                             lv_obj_set_style_pad_all(s_wifi_banner, 4, 0);
-                            lv_obj_add_flag(s_wifi_banner, LV_OBJ_FLAG_FLOATING);
+                            lv_obj_add_flag(s_wifi_banner, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
                             lv_obj_align(s_wifi_banner, LV_ALIGN_BOTTOM_MID, 0, 0);
+                            lv_obj_add_event_cb(s_wifi_banner, [](lv_event_t *) {
+                                lv_label_set_text(s_wifi_banner, "Reconnecting...");
+                                WiFi.reconnect();
+                            }, LV_EVENT_CLICKED, nullptr);
                         }
-                        lv_label_set_text(s_wifi_banner, "WiFi disconnected - reconnecting...");
+                        lv_label_set_text(s_wifi_banner, "WiFi disconnected - tap to retry");
                         lv_obj_clear_flag(s_wifi_banner, LV_OBJ_FLAG_HIDDEN);
                         lv_obj_move_foreground(s_wifi_banner);
                         lvgl_unlock();
                     }
-                    dbg("WiFi lost, attempting reconnect...");
-                    WiFi.reconnect();
-                } else if (!connected && was_disconnected) {
-                    // Still disconnected — keep trying
-                    WiFi.reconnect();
                 } else if (connected && was_disconnected) {
-                    // Just reconnected — hide banner
+                    // Reconnected — hide banner
                     was_disconnected = false;
                     dbg("WiFi reconnected: %s", WiFi.localIP().toString().c_str());
                     if (lvgl_lock(50)) {

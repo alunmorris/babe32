@@ -1,13 +1,16 @@
 // 060326 Header bar implementation
 // 120326 Remove forward button; enlarge back button hit area
 // 120326 URL bar is now a textarea for keyboard input
+// 190326 WiFi signal strength indicator below Home button
 #include "ui_header.h"
 #include <Arduino.h>
+#include <WiFi.h>
 
-static lv_obj_t *s_hdr      = nullptr;
-static lv_obj_t *s_back_btn = nullptr;
-static lv_obj_t *s_url_ta   = nullptr;
-static lv_obj_t *s_home_btn = nullptr;
+static lv_obj_t *s_hdr       = nullptr;
+static lv_obj_t *s_back_btn  = nullptr;
+static lv_obj_t *s_url_ta    = nullptr;
+static lv_obj_t *s_home_btn  = nullptr;
+static lv_obj_t *s_wifi_icon = nullptr;
 
 static navigate_cb_t s_nav_cb  = nullptr;
 static back_cb_t     s_back_cb = nullptr;
@@ -83,7 +86,7 @@ lv_obj_t *header_create(lv_obj_t *parent,
     // Home button — RHS of URL bar
     s_home_btn = lv_label_create(hdr);
     lv_obj_set_size(s_home_btn, 30, 26);
-    lv_obj_set_pos(s_home_btn, LV_HOR_RES - 34, 0);
+    lv_obj_set_pos(s_home_btn, LV_HOR_RES - 32, 0);
     lv_label_set_text(s_home_btn, LV_SYMBOL_HOME);
     lv_obj_set_style_text_color(s_home_btn, lv_color_hex(0xE0E0E0), 0);
     lv_obj_set_style_text_font(s_home_btn, &lv_font_montserrat_16, 0);
@@ -91,6 +94,16 @@ lv_obj_t *header_create(lv_obj_t *parent,
     lv_obj_set_style_text_align(s_home_btn, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_flag(s_home_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_home_btn, home_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    // WiFi icon — floating on screen, below Home button
+    s_wifi_icon = lv_label_create(parent);
+    lv_label_set_text(s_wifi_icon, LV_SYMBOL_WIFI);
+    lv_obj_set_size(s_wifi_icon, 30, 16);
+    lv_obj_set_pos(s_wifi_icon, LV_HOR_RES - 31, 30);
+    lv_obj_set_style_text_font(s_wifi_icon, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(s_wifi_icon, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_align(s_wifi_icon, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(s_wifi_icon, LV_OBJ_FLAG_FLOATING);
 
     return hdr;
 }
@@ -135,4 +148,19 @@ void header_set_visible(bool visible) {
     if (!s_hdr) return;
     if (visible) lv_obj_clear_flag(s_hdr, LV_OBJ_FLAG_HIDDEN);
     else         lv_obj_add_flag(s_hdr, LV_OBJ_FLAG_HIDDEN);
+    // WiFi icon stays visible regardless of header state
+}
+
+void header_wifi_foreground() {
+    if (s_wifi_icon) lv_obj_move_foreground(s_wifi_icon);
+}
+
+void header_set_wifi_rssi(int rssi) {
+    if (!s_wifi_icon) return;
+    lv_color_t color;
+    if (rssi <= -80)       color = lv_color_hex(0xFF4444);  // red   — very weak / nil
+    else if (rssi <= -70)  color = lv_color_hex(0xFF8800);  // orange — weak
+    else if (rssi <= -60)  color = lv_color_hex(0xFFCC00);  // yellow — good
+    else                   color = lv_color_hex(0x00C853);  // green  — strong
+    lv_obj_set_style_text_color(s_wifi_icon, color, 0);
 }

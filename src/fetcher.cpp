@@ -1,5 +1,6 @@
 // 060326 Fetch via Brightdata proxy, return raw HTML body, follow redirects
 // 120326 Persistent TLS connection, keep-alive, batched write, DNS cache
+// 190326 PHP proxy (webmashing.com) as primary, Brightdata as fallback
 #include "fetcher.h"
 #include "image_fetch.h"
 #include "url_utils.h"
@@ -19,16 +20,23 @@ static void ensure_buf() {
     }
 }
 
-// Brightdata residential proxy
+// Own PHP proxy (primary for GET)
+static const char *PHP_HOST = "webmashing.com";
+static const int   PHP_PORT = 443;
+static const char *PHP_PATH = "/babe32proxy.php";
+
+// Brightdata residential proxy (fallback for GET)
 static const char *PROXY_HOST = "brd.superproxy.io";
 static const int   PROXY_PORT = 33335;
 static const char *PROXY_AUTH =
     "Basic YnJkLWN1c3RvbWVyLWhsX2E2Zjg5MTU3LXpvbmUtcmVzaWRlbnRpYWxfcHJveHkxOmRhcWNtZnhqdTkzNA==";
+static IPAddress   s_proxy_ip;
+static bool        s_dns_cached = false;
 
-// Persistent connection state
-static WiFiClientSecure *s_client = nullptr;
-static IPAddress s_proxy_ip;
-static bool s_dns_cached = false;
+// Single persistent TLS connection — shared between PHP and Brightdata to save RAM
+enum ConnType { CONN_NONE, CONN_PHP, CONN_BRIGHTDATA };
+static WiFiClientSecure *s_client   = nullptr;
+static ConnType           s_conn_type = CONN_NONE;
 
 // Cookie jar: store cookies for multiple hosts
 #define COOKIE_MAX_HOSTS 4
@@ -64,22 +72,51 @@ static CookieEntry *cookie_alloc(const char *host) {
     return last;
 }
 
-static bool ensure_connected() {
-    if (!s_client) {
-        s_client = new WiFiClientSecure();
-        s_client->setInsecure();
-        s_client->setTimeout(10);
+// Close and delete s_client unconditionally
+static void close_client() {
+    if (s_client) {
+        s_client->stop();
+        delete s_client;
+        s_client = nullptr;
     }
+    s_conn_type = CONN_NONE;
+}
 
-    if (s_client->connected()) {
+// Connect s_client to PHP proxy (closes Brightdata connection if open).
+// Connects by hostname so TLS SNI is sent correctly (required by shared hosting).
+static bool ensure_php_connected() {
+    if (s_client && s_conn_type == CONN_PHP && s_client->connected()) {
+        dbg("Reusing PHP proxy TLS");
+        return true;
+    }
+    close_client();
+    image_fetch_disconnect();
+
+    s_client = new WiFiClientSecure();
+    s_client->setInsecure();
+    s_client->setTimeout(15);
+    dbg("PHP TLS connect %s:%d...", PHP_HOST, PHP_PORT);
+    uint32_t t0 = millis();
+    if (!s_client->connect(PHP_HOST, PHP_PORT)) {
+        dbg("PHP proxy FAIL after %lums", millis() - t0);
+        delete s_client;
+        s_client = nullptr;
+        return false;
+    }
+    s_conn_type = CONN_PHP;
+    dbg("PHP TLS connected in %lums", millis() - t0);
+    return true;
+}
+
+// Connect s_client to Brightdata (closes PHP connection if open)
+static bool ensure_connected() {
+    if (s_client && s_conn_type == CONN_BRIGHTDATA && s_client->connected()) {
         dbg("Reusing TLS connection");
         return true;
     }
-
-    // Free image fetcher's TLS to reclaim internal RAM
+    close_client();
     image_fetch_disconnect();
 
-    // DNS resolve (cached)
     if (!s_dns_cached) {
         dbg("DNS resolve %s...", PROXY_HOST);
         uint32_t t0 = millis();
@@ -91,22 +128,24 @@ static bool ensure_connected() {
         dbg("DNS: %s -> %s in %lums", PROXY_HOST, s_proxy_ip.toString().c_str(), millis() - t0);
     }
 
+    s_client = new WiFiClientSecure();
+    s_client->setInsecure();
+    s_client->setTimeout(10);
     dbg("TLS connect %s:%d...", s_proxy_ip.toString().c_str(), PROXY_PORT);
     uint32_t t0 = millis();
     if (!s_client->connect(s_proxy_ip, PROXY_PORT)) {
         dbg("Proxy FAIL after %lums", millis() - t0);
+        delete s_client;
+        s_client = nullptr;
         return false;
     }
+    s_conn_type = CONN_BRIGHTDATA;
     dbg("TLS connected in %lums", millis() - t0);
     return true;
 }
 
 void fetch_disconnect() {
-    if (s_client) {
-        s_client->stop();
-        delete s_client;
-        s_client = nullptr;
-    }
+    close_client();
     s_dns_cached = false;
     s_proxy_ip = IPAddress();
     dbg("Fetch connection closed");
@@ -488,8 +527,7 @@ static bool ensure_direct(const char *url) {
     const char *path;
     parse_url(url, host, sizeof(host), &path);
 
-    // Close any existing proxy connection — we'll reconnect later
-    if (s_client) { s_client->stop(); delete s_client; s_client = nullptr; }
+    close_client();
 
     s_client = new WiFiClientSecure();
     s_client->setInsecure();
@@ -502,8 +540,100 @@ static bool ensure_direct(const char *url) {
         s_client = nullptr;
         return false;
     }
+    s_conn_type = CONN_NONE;  // direct — not a named proxy
     dbg("Direct TLS connected in %lums", millis() - t0);
     return true;
+}
+
+// Send request via own PHP proxy. s_client must already be connected to PHP host.
+// Returns HTTP status, sets *total_out.
+static int do_php_request(const char *url, size_t *total_out) {
+    *total_out = 0;
+    if (!s_client || !s_client->connected()) return 0;
+
+    char encoded[768];
+    url_encode(url, encoded, sizeof(encoded));
+
+    char req[1024];
+    int req_len = snprintf(req, sizeof(req),
+        "GET %s?url=%s HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n"
+        "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.8\r\n"
+        "Accept-Encoding: identity\r\n"
+        "Connection: keep-alive\r\n\r\n",
+        PHP_PATH, encoded, PHP_HOST);
+
+    if (req_len >= (int)sizeof(req)) { dbg("PHP req too large"); return 0; }
+
+    s_client->write((const uint8_t *)req, req_len);
+    dbg("PHP GET sent (%d bytes)", req_len);
+    uint32_t t0 = millis();
+
+    // Read response headers
+    size_t hdr_len = 0;
+    size_t cap = FETCH_BUF_SIZE - 1;
+    uint32_t idle = millis();
+    bool found_end = false;
+    while (hdr_len < cap && hdr_len < 8192 && !s_cancel) {
+        if (s_client->available()) {
+            fetch_buf[hdr_len] = s_client->read();
+            hdr_len++;
+            idle = millis();
+            if (hdr_len >= 4 &&
+                fetch_buf[hdr_len-4] == '\r' && fetch_buf[hdr_len-3] == '\n' &&
+                fetch_buf[hdr_len-2] == '\r' && fetch_buf[hdr_len-1] == '\n') {
+                found_end = true;
+                break;
+            }
+        } else if (!s_client->connected()) {
+            break;
+        } else if (millis() - idle > 10000) {
+            dbg("PHP header timeout");
+            break;
+        } else {
+            delay(1);
+        }
+    }
+    fetch_buf[hdr_len] = '\0';
+
+    int status = 0;
+    if (found_end && hdr_len > 12)
+        sscanf(fetch_buf, "HTTP/%*d.%*d %d", &status);
+    dbg("PHP HTTP %d (%zu hdr, %lums)", status, hdr_len, millis() - t0);
+
+    if (!found_end) {
+        return 0;
+    }
+
+    long content_length = -1;
+    bool chunked = false;
+    {
+        char *cl = strcasestr(fetch_buf, "\r\nContent-Length:");
+        if (cl) { cl += 17; while (*cl == ' ') cl++; content_length = strtol(cl, nullptr, 10); }
+        char *te = strcasestr(fetch_buf, "\r\nTransfer-Encoding:");
+        if (te) { te += 20; while (*te == ' ') te++; if (strncasecmp(te, "chunked", 7) == 0) chunked = true; }
+    }
+
+    if (status == 200) {
+        size_t body_bytes = 0;
+        if (content_length >= 0) {
+            body_bytes = read_exact(hdr_len, (size_t)content_length);
+        } else if (chunked) {
+            int cb = read_chunked_body(hdr_len);
+            body_bytes = (cb >= 0) ? (size_t)cb : 0;
+        } else {
+            body_bytes = read_until_close(hdr_len);
+        }
+        *total_out = hdr_len + body_bytes;
+        fetch_buf[*total_out] = '\0';
+        dbg("PHP body: %zu bytes in %lums", body_bytes, millis() - t0);
+    } else {
+        *total_out = hdr_len;
+        fetch_buf[hdr_len] = '\0';
+    }
+
+    return status;
 }
 
 static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
@@ -524,6 +654,27 @@ static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
 
     // Only send POST body on the first request; redirects become GET
     const char *cur_body = post_body;
+
+    // Try PHP proxy first for GET requests (follows redirects server-side)
+    if (!cur_body) {
+        if (ensure_php_connected()) {
+            size_t total = 0;
+            int status = do_php_request(cur_url, &total);
+            if (!s_cancel && status == 200 && total > 0) {
+                char *body = strstr(fetch_buf, "\r\n\r\n");
+                if (body) {
+                    body += 4;
+                    size_t body_len = total - (size_t)(body - fetch_buf);
+                    memmove(fetch_buf, body, body_len);
+                    fetch_buf[body_len] = '\0';
+                    dbg("PHP proxy OK: %zu bytes", body_len);
+                    return (int)body_len;
+                }
+            }
+            dbg("PHP proxy failed (status=%d), falling back to Brightdata", status);
+            // close_client() will be called inside ensure_connected() on next attempt
+        }
+    }
 
     for (int attempt = 0; attempt < 5; attempt++) {
         if (s_cancel) break;
@@ -611,6 +762,18 @@ static int fetch_impl(const char *url, const char *post_body, char **buf_out) {
             cur_url[sizeof(cur_url) - 1] = '\0';
             cur_body = nullptr;  // redirects become GET
             dbg("Redirect -> %.40s", cur_url);
+            continue;
+        }
+
+        if (status == 402) {
+            // Brightdata rate-limit on this exit node — pause briefly then retry
+            // (lwIP DNS cache means we usually reconnect to the same superproxy IP,
+            //  but Brightdata rotates the residential exit node on each new connection)
+            close_client();
+            s_dns_cached = false;
+            s_proxy_ip = IPAddress();
+            dbg("402 rate limit, pausing before retry (attempt %d)...", attempt + 1);
+            delay(1000);
             continue;
         }
 

@@ -489,6 +489,7 @@ void page_img_set(int index, uint8_t *data, size_t len) {
 bool page_img_full_pending(const char **url) {
     if (s_full_pending_url) {
         *url = s_full_pending_url;
+        s_full_pending_url = nullptr;  // consume — prevents re-posting every tick
         return true;
     }
     return false;

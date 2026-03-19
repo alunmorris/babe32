@@ -3,6 +3,9 @@
 * 130326 New https://chatgpt.com/c/69b48b9b-eec8-8392-9001-7436c0ccf4ec
 * 140326 add preamble to guide responses of c.250 words, do web searches. Remove buttons, 'new' clears chat. Remove <style> section. Keep users seperate
 * 150326 bot replies preserve <a> tags as clickable links instead of escaping them
+* 170326 Make heasding Green
+* 180326 unbold 'new' in the Help line
+* 190326 Make heading font x-large
 */
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -145,8 +148,8 @@ function display_text($text, $allow_links = false) {
 </head>
 <body>
 
-<h2>Gemini Chatbot Beta v0.3</h2>
-<p>Type <b>new</b> to clear the chat</p>
+<div style="color:green;font-size: x-large;">Gemini Chatbot v0.4</div>
+<p>Type new to clear the chat</p>
 
 <div>
 <?php
