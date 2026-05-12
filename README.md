@@ -1,6 +1,6 @@
 # Babe32 — Barely Adequate Browser ESP32
 
-A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via a text-only proxy, renders a subset of HTML with LVGL. Optionally loads images. No Javascript - be realistic!
+A text web browser that runs on the Cheap Black Display (CBD) - a cheap ESP32-S3 capacitive touchscreen module. It fetches pages via a text-only proxy, renders a subset of HTML with LVGL. Optionally loads images. No Javascript - be realistic!
 
 ![Babe32 browser on device](docs/images/babe32-device.jpg)
 <!-- Add your photo here. Create docs/images/ and drop in a shot of the device. -->
@@ -9,9 +9,9 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 
 ## Features
 
-- **Web browsing** — fetches raw HTML via a self-hosted PHP proxy (primary) with Brightdata residential proxy as fallback; rendered as plain text by the on-device HTML parser
+- **Web browsing** — fetches raw HTML (1MB max) via a self-hosted PHP proxy (primary) with Brightdata residential proxy as fallback; rendered as plain text by the on-device HTML parser
 - **HTML rendering** — headings (h1–h6), paragraphs, links, bold/italic/monospace, font sizes, inline colour
-- **Image viewing** — inline images fetched via a resize proxy, tappable for full-screen view
+- **Image viewing** — thumbnail images fetched via a resize proxy, tappable for full-screen view
 - **HTML forms** — text inputs, dropdowns, submit buttons (GET and POST)
 - **Touch navigation** — swipe left/right for back/forward; tap links; pull-to-refresh
 - **On-screen keyboard** — LVGL keyboard slides up on text focus
@@ -19,9 +19,9 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 - **WiFi setup UI** — scan APs, enter password, stores up to 10 networks in NVS
 - **WiFi signal indicator** — live strength bar in the header
 - **Navigation history** — 50-URL back/forward stack
-- **Boot menu** — quick Wikipedia search on startup
+- **Boot menu** — type a url, do a web or Wikipedia search, load Hackaday.com or view a HTML test page.
 - **AI Chat** — built-in chat screen backed by a server-side PHP endpoint
-- **Power management** — backlight dim → off → light-sleep after inactivity (battery build)
+- **Power management** — backlight dim → off → light-sleep after inactivity (battery build).
 
 ---
 
@@ -29,12 +29,12 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 
 | Component | Detail |
 |-----------|--------|
-| Board | Guition / Sunton JC3248W535C |
-| MCU | ESP32-S3, dual-core 240 MHz |
-| Flash | 16 MB QIO |
-| PSRAM | 8 MB OPI high-speed |
-| Display | 320×480 ST7701S (landscape: 480×320), RGB parallel interface |
-| Touch | GT911, I²C |
+| Board  | Guition / Sunton JC3248W535C |
+| MCU    | ESP32-S3, dual-core 240 MHz |
+| Flash  | 16 MB QIO |
+| PSRAM  | 8 MB OPI high-speed |
+| Display| 320×480 ST7701S (landscape: 480×320), RGB parallel interface |
+| Touch  | GT911, I²C |
 
 The board is widely sold under several brand names (Guition, Sunton, Elecrow 4.0"). Look for the **JC3248W535C** or **ESP32-S3-4848S040** part number.
 
@@ -117,7 +117,7 @@ Babe32 fetches pages through two proxies in sequence:
    Upload this to any PHP web host. Set `PHP_HOST` and `PHP_PATH` in `src/fetcher.cpp` to point at your server.
 
 2. **Fallback — Brightdata residential proxy**  
-   Sign up at [brightdata.com](https://brightdata.com), create a residential proxy, and fill in `PROXY_HOST`, `PROXY_PORT`, and `PROXY_AUTH` in `src/fetcher.cpp`.
+   Sign up at [brightdata.com](https://brightdata.com), create a residential proxy, and fill in `PROXY_HOST`, `PROXY_PORT`, and `PROXY_AUTH` in `src/fetcher.cpp`. Brightdata is paid for but very cheap.
 
 Without at least one proxy configured the browser will not load pages.
 
