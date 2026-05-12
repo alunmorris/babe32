@@ -1,6 +1,6 @@
 # Babe32 — Barely Adequate Browser ESP32
 
-A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via a text-only proxy, renders HTML with LVGL, and lets you navigate the web with your finger on a 480×480 display.
+A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via a text-only proxy, renders a subset of HTML with LVGL. Optionally loads imags. No Javascript - be realistic!
 
 ![Babe32 browser on device](docs/images/babe32-device.jpg)
 <!-- Add your photo here. Create docs/images/ and drop in a shot of the device. -->
