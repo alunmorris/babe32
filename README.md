@@ -9,7 +9,7 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 
 ## Features
 
-- **Text browsing** — fetches pages via a self-hosted PHP proxy (primary) with Brightdata residential proxy as fallback
+- **Web browsing** — fetches raw HTML via a self-hosted PHP proxy (primary) with Brightdata residential proxy as fallback; rendered as plain text by the on-device HTML parser
 - **HTML rendering** — headings (h1–h6), paragraphs, links, bold/italic/monospace, font sizes, inline colour
 - **Image viewing** — inline images fetched via a resize proxy, tappable for full-screen view
 - **HTML forms** — text inputs, dropdowns, submit buttons (GET and POST)
