@@ -167,7 +167,7 @@ void loop() {
 **Step 5: Compile**
 
 ```bash
-cd /home/alun/esp32/ccd/browser
+cd /home/alun/esp32/browser
 pio run
 ```
 
