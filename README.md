@@ -15,7 +15,7 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 - **HTML forms** — text inputs, dropdowns, submit buttons (GET and POST)
 - **Touch navigation** — swipe left/right for back/forward; tap links; pull-to-refresh
 - **On-screen keyboard** — LVGL keyboard slides up on text focus
-- **External keyboard** — BLE HID or USB HID keyboard (compile-time option)
+- **External keyboard** — BLE HID keyboard support
 - **WiFi setup UI** — scan APs, enter password, stores up to 10 networks in NVS
 - **WiFi signal indicator** — live strength bar in the header
 - **Navigation history** — 50-URL back/forward stack
@@ -84,9 +84,6 @@ cd babe32
 # Default build (base browser)
 pio run -e jc3248w535c --target upload
 
-# With USB keyboard support
-pio run -e jc3248w535c_usb_kb --target upload
-
 # Battery / power-saving build
 pio run -e jc3248w535c_battery --target upload
 ```
@@ -102,7 +99,6 @@ pio device monitor
 | Environment | Description |
 |-------------|-------------|
 | `jc3248w535c` | Standard build |
-| `jc3248w535c_usb_kb` | USB HID keyboard host |
 | `jc3248w535c_battery` | Battery power management (dim/sleep) |
 
 ---
@@ -133,9 +129,7 @@ Upload `src/server/aichat.php` to your web server and update the endpoint URL in
 
 ## External Keyboard
 
-**BLE keyboard** — pairing happens automatically on first connect. Any BLE HID keyboard should work (tested with standard Bluetooth keyboards).
-
-**USB keyboard** — build with the `jc3248w535c_usb_kb` environment. Connect a USB keyboard via a USB-A OTG adapter to the board's USB port.
+**BLE keyboard** — pairing happens automatically on first connect. Any BLE HID keyboard should work.
 
 | Key | Action |
 |-----|--------|
@@ -172,7 +166,6 @@ babe32/
     ├── boot_menu.{h,cpp}      # Boot screen + Wikipedia search
     ├── gesture.{h,cpp}        # Swipe detection
     ├── ble_kb.{h,cpp}         # BLE HID keyboard host
-    ├── usb_kb.{h,cpp}         # USB HID keyboard host
     ├── power_mgr.{h,cpp}      # Battery power management
     ├── ui_header.{h,cpp}      # Header bar (back/fwd/URL/signal)
     ├── ui_buttons.{h,cpp}     # Toolbar buttons
