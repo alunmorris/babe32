@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 14 px
  * Bpp: 4
- * Opts: --bpp 4 --size 14 --font /tmp/Montserrat-Bold.ttf --range 0x20-0x7F --format lvgl --no-compress -o /home/alun/esp32/ccd/browser/src/lv_font_montserrat_bold_14.c --lv-include lvgl.h
+ * Opts: --bpp 4 --size 14 --font /tmp/Montserrat-Bold.ttf --range 0x20-0x7F --format lvgl --no-compress -o /home/alun/esp32/browser/src/lv_font_montserrat_bold_14.c --lv-include lvgl.h
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

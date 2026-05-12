@@ -1,0 +1,6 @@
+.pio/
+.claude/
+.archive-failed-BT-KB-version/
+*.Zone.Identifier
+*:Zone.Identifier
+*.orig
