@@ -4,3 +4,4 @@
 *.Zone.Identifier
 *:Zone.Identifier
 *.orig
+src/server/aichat_secrets.php
