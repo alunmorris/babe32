@@ -1,6 +1,6 @@
 # Babe32 — Barely Adequate Browser ESP32
 
-A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via a text-only proxy, renders HTML with LVGL, and lets you navigate the web with your finger on a 480×480 display.
+A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via a text-only proxy, renders HTML with LVGL, and lets you navigate the web with your finger on a 320×480 display.
 
 ![Babe32 browser on device](docs/images/babe32-device.jpg)
 <!-- Add your photo here. Create docs/images/ and drop in a shot of the device. -->
@@ -33,7 +33,7 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 | MCU | ESP32-S3, dual-core 240 MHz |
 | Flash | 16 MB QIO |
 | PSRAM | 8 MB OPI high-speed |
-| Display | 480×480 ST7701S, RGB parallel interface |
+| Display | 320×480 ST7701S, RGB parallel interface |
 | Touch | GT911, I²C |
 
 The board is widely sold under several brand names (Guition, Sunton, Elecrow 4.0"). Look for the **JC3248W535C** or **ESP32-S3-4848S040** part number.
@@ -189,7 +189,7 @@ babe32/
 - **No JavaScript** — pages are rendered server-side text; interactive JS apps won't work
 - **No TLS certificate pinning** — the proxy handles TLS; the device trusts the proxy
 - **Single tab** — one page at a time
-- **480×480 display** — pages are reformatted for a narrow portrait layout
+- **320×480 display** — pages are reformatted for a narrow portrait layout
 
 ---
 
