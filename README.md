@@ -33,7 +33,7 @@ A text web browser that runs on the Cheap Black Display (CBD) - a cheap ESP32-S3
 | MCU       | ESP32-S3, dual-core 240 MHz with 16MB flash and 8MB RAM|
 | Flash     | 16 MB QIO (quad SPI) |
 | PSRAM     | 8 MB OPI (octal SPI) high-speed |
-| Display   | 320×480 ST7701S (landscape: 480×320), RGB parallel interface |
+| Display   | 320×480 AXS15231B (landscape: 480×320), QSPI interface |
 | Touch     | GT911, I²C |
 
 The board is widely sold under several brand names (Guition, Sunton, Elecrow 4.0"). Look for the **JC3248W535C** or **ESP32-S3-4848S040** part number.
@@ -150,7 +150,7 @@ babe32/
 ├── lv_conf.h
 └── src/
     ├── main.cpp               # Entry point
-    ├── display.{h,cpp}        # ST7701S RGB panel driver + LVGL flush
+    ├── display.{h,cpp}        # AXS15231B QSPI display driver + LVGL flush
     ├── touch.{h,cpp}          # GT911 touch driver + LVGL indev
     ├── ui_task.{h,cpp}        # LVGL FreeRTOS task (core 1)
     ├── net_task.{h,cpp}       # Network FreeRTOS task (core 0)
