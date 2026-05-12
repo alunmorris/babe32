@@ -28,7 +28,7 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = $_SESSION['user_id'];
 
 /* ---------- CONFIG ---------- */
-$API_KEY = "AIzaSyBBm4V2llKry7L0HcNaEXuOuzd8emgY1ww";
+$API_KEY = <Gemini API key>;
 $SYSTEM_PREAMBLE = "Respond in 250 words or fewer. No ** or * emphasis, no tables. Use paragraphs to separate distinct ideas. When mentioning a website, wrap the site name in an HTML link like <a href=\"https://example.com\">Example Site</a> — never show the raw URL. When quoting current or time-sensitive information, use your search tool to check live sources first.";
 
 /* ---------- DATABASE ---------- */
