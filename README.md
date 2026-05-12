@@ -9,7 +9,7 @@ A text web browser that runs on a cheap ESP32-S3 touchscreen. Fetches pages via 
 
 ## Features
 
-- **Text browsing** — strips pages to readable text via [textise.net](https://www.textise.net/) + a self-hosted PHP proxy
+- **Text browsing** — fetches pages via a self-hosted PHP proxy (primary) with Brightdata residential proxy as fallback
 - **HTML rendering** — headings (h1–h6), paragraphs, links, bold/italic/monospace, font sizes, inline colour
 - **Image viewing** — inline images fetched via a resize proxy, tappable for full-screen view
 - **HTML forms** — text inputs, dropdowns, submit buttons (GET and POST)
@@ -118,10 +118,10 @@ On first boot, open the boot menu and tap **WiFi Setup**. The browser scans for 
 Babe32 fetches pages through two proxies in sequence:
 
 1. **Primary — self-hosted PHP proxy** (`src/server/babe32proxy.php`)  
-   Upload this to any PHP web host. Edit `src/fetcher.cpp` to point `PROXY_HOST` at your server.
+   Upload this to any PHP web host. Set `PHP_HOST` and `PHP_PATH` in `src/fetcher.cpp` to point at your server.
 
 2. **Fallback — Brightdata residential proxy**  
-   Sign up at [brightdata.com](https://brightdata.com), create a residential proxy, and fill in the credentials in `src/fetcher.cpp`.
+   Sign up at [brightdata.com](https://brightdata.com), create a residential proxy, and fill in `PROXY_HOST`, `PROXY_PORT`, and `PROXY_AUTH` in `src/fetcher.cpp`.
 
 Without at least one proxy configured the browser will not load pages.
 
