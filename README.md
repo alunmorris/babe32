@@ -29,12 +29,12 @@ A text web browser that runs on the Cheap Black Display (CBD) - a cheap ESP32-S3
 
 | Component | Detail |
 |-----------|--------|
-| Board  | Guition / Sunton JC3248W535C |
-| MCU    | ESP32-S3, dual-core 240 MHz |
-| Flash  | 16 MB QIO |
-| PSRAM  | 8 MB OPI high-speed |
-| Display| 320×480 ST7701S (landscape: 480×320), RGB parallel interface |
-| Touch  | GT911, I²C |
+| Board     | Guition / Sunton JC3248W535C |
+| MCU       | ESP32-S3, dual-core 240 MHz with 16MB flash and 8MB RAM|
+| Flash     | 16 MB QIO (quad SPI) |
+| PSRAM     | 8 MB OPI (octal SPI) high-speed |
+| Display   | 320×480 ST7701S (landscape: 480×320), RGB parallel interface |
+| Touch     | GT911, I²C |
 
 The board is widely sold under several brand names (Guition, Sunton, Elecrow 4.0"). Look for the **JC3248W535C** or **ESP32-S3-4848S040** part number.
 
