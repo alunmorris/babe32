@@ -7,6 +7,7 @@
 * 180326 unbold 'new' in the Help line
 * 190326 Make heading font x-large
 * 120526 Store API key in secrets file
+* 030526 Change to Gemini 3 Flash Lite. Gemini 3.1 too slow
 */
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -46,7 +47,7 @@ CREATE TABLE IF NOT EXISTS messages (
 
 /* ---------- GEMINI CALL ---------- */
 function ask_gemini($text, $api_key, $system_instruction) {
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" . $api_key;
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=" . $api_key;
     $prompt = $system_instruction . "\n\n" . $text;
 
     $data = [
