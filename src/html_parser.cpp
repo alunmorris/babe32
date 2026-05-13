@@ -1,5 +1,6 @@
 // 060326 Single-pass HTML tokenizer
 // 160326 Add assume_body param for parsing partial/truncated HTML
+// 130526 Increase tag buffer 1024→2048 to handle long WordPress img tags
 #include "html_parser.h"
 #include "url_utils.h"
 #include <Arduino.h>
