@@ -1,6 +1,7 @@
 // 060326 Fetch via Brightdata proxy, return raw HTML body, follow redirects
 // 120326 Persistent TLS connection, keep-alive, batched write, DNS cache
 // 190326 PHP proxy (webmashing.com) as primary, Brightdata as fallback
+// 130526 Redirect mbedTLS allocs to PSRAM — internal heap too fragmented for 40KB SSL buffers
 #include "fetcher.h"
 #include "image_fetch.h"
 #include "url_utils.h"
@@ -8,14 +9,26 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <mbedtls/platform.h>
+#include <esp_heap_caps.h>
 
 extern volatile int g_fetch_kb;
 
 static volatile bool s_cancel = false;
 static char *fetch_buf = nullptr;
 
+// mbedTLS allocates ~40KB of SSL buffers. Internal SRAM is too fragmented to satisfy
+// this as a contiguous block. Redirect to PSRAM; ESP32-S3 AES DMA handles PSRAM data.
+static void *tls_psram_calloc(size_t n, size_t size) {
+    void *p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = heap_caps_calloc(n, size, MALLOC_CAP_8BIT);
+    return p;
+}
+static void tls_psram_free(void *ptr) { heap_caps_free(ptr); }
+
 static void ensure_buf() {
     if (!fetch_buf) {
+        mbedtls_platform_set_calloc_free(tls_psram_calloc, tls_psram_free);
         fetch_buf = (char *)heap_caps_malloc(FETCH_BUF_SIZE, MALLOC_CAP_SPIRAM);
     }
 }
