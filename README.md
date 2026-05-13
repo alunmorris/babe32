@@ -129,6 +129,11 @@ Upload `src/server/aichat.php` to your web server and update the endpoint URL in
 
 ## External Keyboard
 
+> **⚠ Deprecated — BLE keyboard support (`deprecated/bluetooth-kb` branch) is not recommended.**
+> The NimBLE host stack consumes ~62 KB of internal SRAM, leaving insufficient memory for TLS
+> connections. Even with workarounds, WiFi/BLE radio coexistence on the ESP32-S3 causes
+> significant page load slowdowns. Use the standard build without BLE.
+
 **BLE keyboard** — pairing happens automatically on first connect. Any BLE HID keyboard should work.
 
 | Key | Action |
