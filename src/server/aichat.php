@@ -6,7 +6,7 @@
 * 170326 Make heasding Green
 * 180326 unbold 'new' in the Help line
 * 190326 Make heading font x-large
-* 120526 change API key
+* 120526 Store API key in secrets file
 */
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
