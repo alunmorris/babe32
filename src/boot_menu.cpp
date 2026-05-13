@@ -1,5 +1,7 @@
 // 180326 Boot menu and wiki search screens (extracted from ui_task.cpp)
 // 190326 Replace WiFiManager portal with self-contained wifi_setup flow
+// 130526 change url of HTML test page
+// 130526 Add Off button (deep sleep, wake on BOOT button GPIO 0)
 #include "boot_menu.h"
 #include "wifi_setup.h"
 #include "page_renderer.h"
@@ -9,6 +11,8 @@
 #include <Arduino.h>
 #include <string.h>
 #include <freertos/task.h>
+#include <esp_sleep.h>
+#include <driver/gpio.h>
 
 extern bool lvgl_lock(uint32_t ms);
 extern void lvgl_unlock();
@@ -23,6 +27,7 @@ static urls_mode_cb_t    s_urls_cb    = nullptr;
 static lv_obj_t         *s_wiki_ta    = nullptr;
 static lv_obj_t         *s_inv_btn   = nullptr;
 static lv_obj_t         *s_wifi_btn  = nullptr;
+static lv_obj_t         *s_off_btn   = nullptr;
 
 struct MenuItem { const char *label; const char *url; };
 static const MenuItem s_menu[] = {
@@ -30,7 +35,7 @@ static const MenuItem s_menu[] = {
     {"Wikipedia", nullptr},
     {"Hackaday", "https://hackaday.com"},
     {"AI Chat", AICHAT_URL},
-    {"HTML test page", "https://www.wvc.edu/_resources/clutter/zz-test/_testing/test.aspx"},
+    {"HTML test page", "http://www.raeries.com/2022/05/20/test-post-with-html-elements/"},
 };
 static const int s_menu_count = sizeof(s_menu) / sizeof(s_menu[0]);
 
@@ -49,6 +54,7 @@ lv_obj_t *boot_menu_get_wiki_ta() {
 static void hide_boot_buttons() {
     if (s_inv_btn) { lv_obj_del(s_inv_btn); s_inv_btn = nullptr; }
     if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
+    if (s_off_btn)  { lv_obj_del(s_off_btn);  s_off_btn  = nullptr; }
 }
 
 static void menu_item_cb(lv_event_t *e) {
@@ -214,10 +220,10 @@ void show_boot_menu() {
         y_pos += 30;
     }
 
-    // Light/Dark mode toggle button (narrower) + WiFi Setup button
-    int btn_w = 90;
+    // Bottom button row: Light/Dark | WiFi | Off
+    int btn_w = 65;
     int btn_gap = 8;
-    int total_w = btn_w * 2 + btn_gap;
+    int total_w = btn_w * 3 + btn_gap * 2;
     int btn_x = col_x + (col_w - total_w) / 2;
     int btn_y = LV_VER_RES - 36;
 
@@ -237,6 +243,7 @@ void show_boot_menu() {
         lv_obj_del(lv_event_get_target(e));
         s_inv_btn = nullptr;
         if (s_wifi_btn) { lv_obj_del(s_wifi_btn); s_wifi_btn = nullptr; }
+        if (s_off_btn)  { lv_obj_del(s_off_btn);  s_off_btn  = nullptr; }
         page_set_inverted(!page_is_inverted());
         lv_obj_set_style_bg_color(lv_scr_act(),
             lv_color_hex(page_is_inverted() ? 0xF0F0F0 : 0x1A1A2E), 0);
@@ -257,6 +264,24 @@ void show_boot_menu() {
     lv_obj_set_style_text_font(wifi_lbl, &lv_font_montserrat_14, 0);
     lv_obj_center(wifi_lbl);
     lv_obj_add_event_cb(s_wifi_btn, wifi_setup_btn_cb, LV_EVENT_CLICKED, nullptr);
+
+    // Off button — deep sleep, wake on BOOT button (GPIO 0)
+    if (s_off_btn) { lv_obj_del(s_off_btn); s_off_btn = nullptr; }
+    s_off_btn = lv_btn_create(lv_scr_act());
+    lv_obj_set_size(s_off_btn, btn_w, 32);
+    lv_obj_set_pos(s_off_btn, btn_x + (btn_w + btn_gap) * 2, btn_y);
+    lv_obj_set_style_bg_color(s_off_btn, lv_color_hex(inv ? 0xCCCCCC : 0x0F3460), 0);
+    lv_obj_set_style_radius(s_off_btn, 4, 0);
+    lv_obj_set_style_shadow_width(s_off_btn, 0, 0);
+    lv_obj_t *off_lbl = lv_label_create(s_off_btn);
+    lv_label_set_text(off_lbl, "Off");
+    lv_obj_set_style_text_color(off_lbl, lv_color_hex(inv ? 0x333333 : 0xCCCCCC), 0);
+    lv_obj_set_style_text_font(off_lbl, &lv_font_montserrat_14, 0);
+    lv_obj_center(off_lbl);
+    lv_obj_add_event_cb(s_off_btn, [](lv_event_t *) {
+        esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);  // wake: BOOT button low
+        esp_deep_sleep_start();
+    }, LV_EVENT_CLICKED, nullptr);
 
     header_set_url("");
     lvgl_unlock();

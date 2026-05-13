@@ -432,7 +432,7 @@ void html_parse(const char *html, const char *base_url, ParseResult *r,
                name[name_len] != '>' && name[name_len] != '/') name_len++;
 
         size_t tag_str_len = (size_t)(tag_end - tag_start);
-        static char tag_str[1024];
+        static char tag_str[2048];
         size_t copy_len = tag_str_len < sizeof(tag_str) - 1 ? tag_str_len : sizeof(tag_str) - 1;
         memcpy(tag_str, tag_start, copy_len);
         tag_str[copy_len] = '\0';
