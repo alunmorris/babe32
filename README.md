@@ -2,11 +2,10 @@
 
 A text web browser that runs on the Cheap Black Display (CBD) - a cheap ESP32-S3 capacitive touchscreen module. It fetches pages via a pass-through proxy, renders a subset of HTML with LVGL. Optionally loads images. No Javascript - be realistic!
 
-![Babe32 browser on device](docs/images/babe32-device.jpg)
-<!-- Add your photo here. Create docs/images/ and drop in a shot of the device. -->
+<img width="2467" height="1705" alt="IMG_20260515_112920734_HDR~2" src="https://github.com/user-attachments/assets/7ffdf1d2-8a12-4af6-b262-b229d2e6b059" />
 
+https://youtu.be/If5GsIW79E0?si=GUtGvhs5Pg7Q8_43
 ---
-
 ## Features
 
 - **Web browsing** — fetches raw HTML (1MB max) via a self-hosted PHP proxy (primary) with Brightdata residential proxy as fallback; rendered as plain text by the on-device HTML parser
@@ -66,6 +65,7 @@ PSRAM memory budget:
 | WiFi AP list (10 entries) | ~2 KB |
 
 ---
+<img width="3738" height="2304" alt="IMG_20260515_113138109_HDR" src="https://github.com/user-attachments/assets/ae6c2767-791f-45b1-826b-8fdb0ab1300c" />
 
 ## Getting Started
 
